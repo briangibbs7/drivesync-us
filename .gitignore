@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.log
+*.tar.gz
+CREDENTIALS.txt
+thumbnails/
+temp/
+uploads/
+*.bak*
