@@ -17,7 +17,7 @@ router.get('/', authenticate, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/', authenticate, authorize('admin'), async (req, res) => {
+router.post('/', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { name, icon, color, description, default_role, storage_quota } = req.body;
     if (!name) return res.status(400).json({ error: 'Name required' });
@@ -36,7 +36,7 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
   }
 });
 
-router.patch('/:id', authenticate, authorize('admin'), async (req, res) => {
+router.patch('/:id', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { name, icon, color, description, default_role, storage_quota } = req.body;
     const fields = []; const params = []; let idx = 1;
@@ -55,7 +55,7 @@ router.patch('/:id', authenticate, authorize('admin'), async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
+router.delete('/:id', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const result = await query('DELETE FROM spaces WHERE id=$1 AND org_id=$2 RETURNING name', [req.params.id, req.user.org_id]);
     if (!result.rows.length) return res.status(404).json({ error: 'Space not found' });
@@ -79,7 +79,7 @@ router.get('/:id/quota', authenticate, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/:id/members', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/:id/members', authenticate, authorize('admin', 'file_manager', 'manager'), async (req, res) => {
   try {
     const { user_id, role = 'member' } = req.body;
     await query('INSERT INTO space_members (space_id, user_id, role) VALUES ($1,$2,$3) ON CONFLICT (space_id, user_id) DO UPDATE SET role=$3', [req.params.id, user_id, role]);
@@ -87,7 +87,7 @@ router.post('/:id/members', authenticate, authorize('admin', 'manager'), async (
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/:id/members/:userId', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.delete('/:id/members/:userId', authenticate, authorize('admin', 'file_manager', 'manager'), async (req, res) => {
   try {
     await query('DELETE FROM space_members WHERE space_id=$1 AND user_id=$2', [req.params.id, req.params.userId]);
     res.json({ message: 'Member removed' });

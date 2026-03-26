@@ -46,7 +46,7 @@ router.get('/:id', authenticate, async (req, res) => {
   }
 });
 
-router.post('/invite', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/invite', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { email, name, role = 'member', department, spaceIds = [] } = req.body;
     if (!email || !name) return res.status(400).json({ error: 'Email and name required' });
@@ -95,7 +95,7 @@ router.post('/invite', authenticate, authorize('admin', 'manager'), async (req, 
 });
 
 // Resend invite
-router.post('/:id/resend-invite', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/:id/resend-invite', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const userRes = await query(
       `SELECT u.*, o.name as org_name FROM users u JOIN organizations o ON u.org_id=o.id WHERE u.id=$1 AND u.org_id=$2 AND u.status='pending'`,
@@ -128,7 +128,7 @@ router.post('/:id/resend-invite', authenticate, authorize('admin', 'manager'), a
   }
 });
 
-router.patch('/:id', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.patch('/:id', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { role, status, department, storage_quota } = req.body;
     const fields = [];

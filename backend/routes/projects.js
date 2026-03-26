@@ -29,7 +29,7 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-router.post('/', authenticate, authorize('admin'), async (req, res) => {
+router.post('/', authenticate, authorize('admin', 'project_manager'), async (req, res) => {
   try {
     const { name, space_id, description, color } = req.body;
     if (!name || !space_id) return res.status(400).json({ error: 'Name and space required' });
@@ -46,7 +46,7 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
   }
 });
 
-router.patch('/:id', authenticate, authorize('admin'), async (req, res) => {
+router.patch('/:id', authenticate, authorize('admin', 'project_manager'), async (req, res) => {
   try {
     const { name, description, color, status } = req.body;
     const fields = []; const params = []; let idx = 1;

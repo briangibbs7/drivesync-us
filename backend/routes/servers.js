@@ -7,7 +7,7 @@ import { logger } from '../logger.js';
 const router = Router();
 
 // List all servers
-router.get('/', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.get('/', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const result = await query(
       `SELECT ns.*, s.name as space_name FROM network_servers ns
@@ -55,7 +55,7 @@ router.post('/', authenticate, authorize('admin'), async (req, res) => {
 });
 
 // Test connection
-router.post('/:id/test', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/:id/test', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const serverRes = await query('SELECT * FROM network_servers WHERE id=$1 AND org_id=$2', [req.params.id, req.user.org_id]);
     if (!serverRes.rows.length) return res.status(404).json({ error: 'Server not found' });
@@ -75,7 +75,7 @@ router.post('/:id/test', authenticate, authorize('admin', 'manager'), async (req
 });
 
 // Browse remote directory
-router.get('/:id/browse', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.get('/:id/browse', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const serverRes = await query('SELECT * FROM network_servers WHERE id=$1 AND org_id=$2', [req.params.id, req.user.org_id]);
     if (!serverRes.rows.length) return res.status(404).json({ error: 'Server not found' });
@@ -93,7 +93,7 @@ router.get('/:id/browse', authenticate, authorize('admin', 'manager'), async (re
 });
 
 // Download specific file from remote
-router.post('/:id/pull', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/:id/pull', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { remote_path, parent_id } = req.body;
     if (!remote_path) return res.status(400).json({ error: 'Remote path required' });
@@ -124,7 +124,7 @@ router.post('/:id/pull', authenticate, authorize('admin', 'manager'), async (req
 });
 
 // Full sync from server
-router.post('/:id/sync', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/:id/sync', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const serverRes = await query('SELECT * FROM network_servers WHERE id=$1 AND org_id=$2', [req.params.id, req.user.org_id]);
     if (!serverRes.rows.length) return res.status(404).json({ error: 'Server not found' });
@@ -146,7 +146,7 @@ router.post('/:id/sync', authenticate, authorize('admin', 'manager'), async (req
 });
 
 // Get sync log
-router.get('/:id/log', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.get('/:id/log', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const result = await query(
       `SELECT * FROM sync_log WHERE server_id=$1 ORDER BY started_at DESC LIMIT 50`,

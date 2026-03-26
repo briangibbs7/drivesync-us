@@ -296,7 +296,7 @@ function fmtDate(d) { if (!d) return "—"; return new Date(d).toLocaleDateStrin
 function fmtTime(d) { if (!d) return "—"; var diff=Date.now()-new Date(d).getTime(); if(diff<60000) return "just now"; if(diff<3600000) return Math.floor(diff/60000)+"m ago"; if(diff<86400000) return Math.floor(diff/3600000)+"h ago"; return fmtDate(d); }
 function fileType(mime, isFolder) { if (isFolder) return "folder"; if (!mime) return "document"; if (mime.startsWith("image/")) return "image"; if (mime.startsWith("video/")) return "video"; if (mime.includes("sheet")||mime.includes("csv")||mime.includes("excel")) return "spreadsheet"; return "document"; }
 
-var roleColors = { admin:"#EF4444", manager:"#F59E0B", member:"#4F8EF7", viewer:"#10B981", external:"#6B7280" };
+var roleColors = { admin:"#EF4444", project_manager:"#F59E0B", file_manager:"#8B5CF6", member:"#4F8EF7", viewer:"#10B981", external:"#6B7280" };
 
 /* ═══════════════════════════════════════════════════════════════════════════
    SHARED UI COMPONENTS
@@ -322,8 +322,101 @@ function FileIcon(props) {
   return <div className={"file-icon "+t}>{t==="folder"?<IconFolder />:<IconFile />}</div>;
 }
 
+/* Role definitions with permissions */
+var roleDefinitions = {
+  admin: {
+    label: "Admin",
+    color: "#EF4444",
+    icon: "👑",
+    desc: "Full control of the entire system",
+    permissions: ["Create, edit, delete spaces & projects","Full user management","Portal creation & management","System settings & monitoring","All file operations","Drive & server management","Share link management","Activity audit access"]
+  },
+  project_manager: {
+    label: "Project Manager",
+    color: "#F59E0B",
+    icon: "📋",
+    desc: "Create and manage projects, add files to assigned projects",
+    permissions: ["Create new projects","Edit own projects","Delete own projects","Upload files & create folders in own projects","Add files to projects assigned as editor","View all spaces & projects","Cannot create spaces","Cannot manage users or portals"]
+  },
+  file_manager: {
+    label: "File Manager",
+    color: "#8B5CF6",
+    icon: "📁",
+    desc: "Full control of files, spaces, sharing, drives, servers and portal access",
+    permissions: ["Create, edit, delete spaces","Full file management across all spaces","Share link creation & management","SMB/CIFS drive mounting & browsing","Server sync management","Portal access management","Invite users","Cannot access system settings"]
+  },
+  member: {
+    label: "Member",
+    color: "#4F8EF7",
+    icon: "👤",
+    desc: "Standard team member with upload access",
+    permissions: ["Upload files & create folders","Create documents in editor","Star & trash own files","Preview & download files","View spaces & projects","Cannot create spaces or projects","Cannot manage users or portals"]
+  },
+  viewer: {
+    label: "Viewer",
+    color: "#10B981",
+    icon: "👁️",
+    desc: "Read-only access to files and projects",
+    permissions: ["View & preview files (PDF, images, video, text)","Browse spaces & projects","View activity feed","Cannot upload, edit, or download","Cannot create or modify anything"]
+  },
+  external: {
+    label: "External",
+    color: "#6B7280",
+    icon: "🌐",
+    desc: "Portal users — customers and contractors with scoped access",
+    permissions: ["Access via branded portal URL only","Scoped to assigned projects","View permission: preview files only","Download permission: preview + download","Edit permission: preview + download + upload","Cannot see main admin interface","Access can be time-limited"]
+  }
+};
+
+function RoleCards() {
+  var [expanded, setExpanded] = useState(null);
+  var entries = Object.entries(roleDefinitions);
+  return (
+    <div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(170px,1fr))",gap:12}}>
+        {entries.map(function(entry) {
+          var key = entry[0], def = entry[1];
+          var isOpen = expanded === key;
+          return React.createElement("div", {key:key},
+            React.createElement("div", {
+              onClick: function(){setExpanded(isOpen?null:key);},
+              style:{
+                background:isOpen?def.color+"12":"var(--bg-secondary)",
+                border:"1px solid "+(isOpen?def.color:"var(--border-subtle)"),
+                borderRadius:12,padding:"16px 18px",cursor:"pointer",
+                transition:"all .2s",position:"relative",overflow:"hidden",
+              }
+            },
+              React.createElement("div",{style:{position:"absolute",top:0,left:0,right:0,height:3,background:def.color}}),
+              React.createElement("div",{style:{display:"flex",alignItems:"center",gap:10,marginBottom:6}},
+                React.createElement("span",{style:{fontSize:22}},def.icon),
+                React.createElement("div",{style:{flex:1}},
+                  React.createElement("div",{style:{fontSize:15,fontWeight:700}},def.label),
+                  React.createElement("div",{style:{fontSize:11,color:"var(--text-tertiary)",lineHeight:1.4,marginTop:2}},def.desc)
+                ),
+                React.createElement("span",{style:{fontSize:10,color:"var(--text-tertiary)",transform:isOpen?"rotate(180deg)":"none",transition:"transform .2s"}},"▼")
+              ),
+              isOpen && React.createElement("div",{style:{marginTop:14,paddingTop:14,borderTop:"1px solid "+def.color+"33"}},
+                React.createElement("div",{style:{fontSize:10,fontWeight:700,color:def.color,marginBottom:10,textTransform:"uppercase",letterSpacing:1.5}},"Permissions"),
+                def.permissions.map(function(p,i){
+                  var isNeg = p.indexOf("Cannot")===0;
+                  return React.createElement("div",{key:i,style:{display:"flex",alignItems:"flex-start",gap:8,padding:"5px 0",fontSize:12,color:isNeg?"var(--text-tertiary)":"var(--text-secondary)"}},
+                    React.createElement("span",{style:{color:isNeg?"var(--danger)":"var(--success)",fontSize:11,marginTop:1,flexShrink:0}},isNeg?"✕":"✓"),
+                    React.createElement("span",null,p)
+                  );
+                })
+              )
+            )
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function RoleBadge(props) {
   var c = roleColors[props.role]||"#6B7280";
+  var label = roleDefinitions[props.role] ? roleDefinitions[props.role].label : props.role;
   return <span className="badge" style={{background:c+"18",color:c}}>{props.role}</span>;
 }
 
@@ -738,7 +831,7 @@ function ProjectsPage() {
 
   return (
     <div>
-      <div className="page-header"><div><div className="page-title">Projects</div><div className="page-subtitle">Organize work into focused containers</div></div>{auth.user&&auth.user.role==="admin"&&<button className="btn btn-primary" onClick={function(){setShow(true);}}><IconPlus /> New Project</button>}</div>
+      <div className="page-header"><div><div className="page-title">Projects</div><div className="page-subtitle">Organize work into focused containers</div></div>{auth.user&&(auth.user.role==="admin"||auth.user.role==="project_manager")&&<button className="btn btn-primary" onClick={function(){setShow(true);}}><IconPlus /> New Project</button>}</div>
       {projects.length===0?<Empty icon="📋" title="No projects yet" sub="Create your first project" />:
       <div className="project-grid">{projects.map(function(p){return(
         <div className="project-card" key={p.id} onClick={function(){openProject(p);}}>
@@ -1323,7 +1416,7 @@ function SpacesPage() {
 
   return (
     <div>
-      <div className="page-header"><div><div className="page-title">Spaces</div><div className="page-subtitle">Team workspaces</div></div>{auth.user&&auth.user.role==="admin"&&<button className="btn btn-primary" onClick={function(){setShow(true);}}><IconPlus /> New Space</button>}</div>
+      <div className="page-header"><div><div className="page-title">Spaces</div><div className="page-subtitle">Team workspaces</div></div>{auth.user&&(auth.user.role==="admin"||auth.user.role==="file_manager")&&<button className="btn btn-primary" onClick={function(){setShow(true);}}><IconPlus /> New Space</button>}</div>
       {spaces.length===0?<Empty icon="🗂️" title="No spaces yet" sub="Create spaces to organize your team" />:
       <div className="project-grid">{spaces.map(function(s){return(
         <div className="project-card" key={s.id} onClick={function(){setActiveSpace(s);}}>
@@ -1704,13 +1797,7 @@ function UsersPage() {
           );})}</tbody>
         </table></div>}
       </div>}
-      {tab==="Roles"&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:14}}>
-        {Object.entries(roleColors).map(function(entry){var key=entry[0],color=entry[1]; return(
-          <div className="card" key={key} style={{borderLeft:"3px solid "+color}}>
-            <div className="card-body"><div style={{fontWeight:600,fontSize:14,marginBottom:4,textTransform:"capitalize"}}>{key}</div><div style={{fontSize:12,color:"var(--text-tertiary)",marginTop:8}}>{users.filter(function(u){return u.role===key;}).length} users</div></div>
-          </div>
-        );})}
-      </div>}
+      {tab==="Roles"&&React.createElement(RoleCards)}
       <Modal open={show} onClose={function(){setShow(false);}} title="Invite User" footer={<React.Fragment><button className="btn btn-secondary" onClick={function(){setShow(false);}}>Cancel</button><button className="btn btn-primary" onClick={invite}>Send Invite</button></React.Fragment>}>
         <div className="form-group"><label className="form-label">Full Name</label><input className="form-input" value={form.name} onChange={function(e){setForm({...form,name:e.target.value});}} placeholder="John Doe" /></div>
         <div className="form-group"><label className="form-label">Email</label><input className="form-input" value={form.email} onChange={function(e){setForm({...form,email:e.target.value});}} placeholder="user@company.com" /></div>
@@ -2376,6 +2463,51 @@ function PortalAdmin(props) {
                 </React.Fragment>}
                 {!a.is_active&&<button className="btn btn-primary btn-sm" onClick={function(){reinstateAccess(a.user_id,a.name);}}>Reinstate</button>}
               </div></td>
+            </tr>
+          );})}</tbody>
+        </table></div></div>}
+      </div>}
+
+      {/* ── Projects & Spaces Tab ── */}
+      {tab==="Projects & Spaces"&&<div>
+        <p style={{fontSize:13,color:"var(--text-secondary)",marginBottom:20}}>Assign projects and spaces to this portal. All portal users will be able to access assigned items based on their permission level.</p>
+
+        {/* Spaces */}
+        <h4 style={{fontSize:14,fontWeight:700,marginBottom:12}}>Spaces</h4>
+        {allSpaces.length===0?<div style={{padding:20,textAlign:"center",color:"var(--text-tertiary)",fontSize:13}}>No spaces available</div>:
+        <div className="card" style={{marginBottom:24}}><div className="table-wrap"><table>
+          <thead><tr><th>Space</th><th>Projects</th><th>Members</th><th>Storage</th><th style={{width:120}}>Status</th></tr></thead>
+          <tbody>{allSpaces.map(function(s){var assigned=assignedSpaceIds.indexOf(s.id)>=0; return(
+            <tr key={s.id}>
+              <td><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:20}}>{s.icon||"📁"}</span><div><div style={{fontWeight:600,fontSize:13}}>{s.name}</div>{s.description&&<div style={{fontSize:11,color:"var(--text-tertiary)"}}>{s.description}</div>}</div></div></td>
+              <td style={{fontSize:12,color:"var(--text-tertiary)"}}>{projects.filter(function(p){return p.space_id===s.id;}).length} projects</td>
+              <td style={{fontSize:12,color:"var(--text-tertiary)"}}>{s.member_count} members</td>
+              <td style={{fontSize:12,color:"var(--text-tertiary)"}}>{fmtSize(parseInt(s.storage_used))}</td>
+              <td>{assigned?
+                <button className="btn btn-danger btn-sm" onClick={function(){unassignSpaceFromPortal(s.id);}} disabled={savingAccess}>Remove</button>:
+                <button className="btn btn-primary btn-sm" onClick={function(){assignSpaceToPortal(s.id);}} disabled={savingAccess}>Assign</button>
+              }</td>
+            </tr>
+          );})}</tbody>
+        </table></div></div>}
+
+        {/* Projects */}
+        <h4 style={{fontSize:14,fontWeight:700,marginBottom:12}}>Projects</h4>
+        {projects.length===0?<div style={{padding:20,textAlign:"center",color:"var(--text-tertiary)",fontSize:13}}>No projects available</div>:
+        <div className="card"><div className="table-wrap"><table>
+          <thead><tr><th>Project</th><th>Space</th><th>Files</th><th>Storage</th><th style={{width:160}}>Status</th></tr></thead>
+          <tbody>{projects.map(function(p){var assigned=assignedProjectIds.indexOf(p.id)>=0; var viaSpace=assignedSpaceIds.indexOf(p.space_id)>=0; return(
+            <tr key={p.id}>
+              <td><div style={{display:"flex",alignItems:"center",gap:10}}><div style={{width:8,height:8,borderRadius:2,background:p.color||"var(--accent)"}}></div><div><div style={{fontWeight:600,fontSize:13}}>{p.name}</div>{p.description&&<div style={{fontSize:11,color:"var(--text-tertiary)"}}>{p.description}</div>}</div></div></td>
+              <td style={{fontSize:12,color:"var(--text-tertiary)"}}>{p.space_name}</td>
+              <td style={{fontSize:12,color:"var(--text-tertiary)"}}>{p.file_count} files</td>
+              <td style={{fontSize:12,color:"var(--text-tertiary)"}}>{fmtSize(parseInt(p.storage_used))}</td>
+              <td>{viaSpace?
+                <span className="badge badge-info" style={{fontSize:10}}>Included via Space</span>:
+                assigned?
+                  <button className="btn btn-danger btn-sm" onClick={function(){unassignProjectFromPortal(p.id);}} disabled={savingAccess}>Remove</button>:
+                  <button className="btn btn-primary btn-sm" onClick={function(){assignProjectToPortal(p.id);}} disabled={savingAccess}>Assign</button>
+              }</td>
             </tr>
           );})}</tbody>
         </table></div></div>}

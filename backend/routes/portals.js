@@ -38,7 +38,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // Create portal
-router.post('/', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { type, name, custom_domain, brand_color, welcome_message, require_sso, require_mfa, allow_signup, watermark_files } = req.body;
     if (!type || !name) return res.status(400).json({ error: 'Type and name required' });
@@ -58,7 +58,7 @@ router.post('/', authenticate, authorize('admin', 'manager'), async (req, res) =
 });
 
 // Update portal
-router.patch('/:id', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.patch('/:id', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { name, custom_domain, brand_color, welcome_message, require_sso, require_mfa, allow_signup, watermark_files } = req.body;
     const fields = []; const params = []; let idx = 1;
@@ -99,7 +99,7 @@ router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
 });
 
 // Add/update portal access
-router.post('/:id/access', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/:id/access', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { user_id, permission, company, project_ids, space_ids, expires_days } = req.body;
     if (!user_id) return res.status(400).json({ error: 'User ID required' });
@@ -132,7 +132,7 @@ router.get('/:id/access', authenticate, async (req, res) => {
 });
 
 // Revoke portal access
-router.delete('/:id/access/:userId', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.delete('/:id/access/:userId', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     await query(
       'UPDATE portal_access SET is_active=false WHERE portal_id=$1 AND user_id=$2',
@@ -145,7 +145,7 @@ router.delete('/:id/access/:userId', authenticate, authorize('admin', 'manager')
 });
 
 // Invite customer (creates user + grants access)
-router.post('/:id/invite', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/:id/invite', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { email, name, password, company, permission, project_ids, space_ids, expires_days } = req.body;
     if (!email || !name || !password) return res.status(400).json({ error: 'Email, name, and password required' });
@@ -209,7 +209,7 @@ router.post('/:id/invite', authenticate, authorize('admin', 'manager'), async (r
 
 
 // Add existing internal user to portal
-router.post('/:id/add-member', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/:id/add-member', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { user_id, permission, project_ids, space_ids, expires_days } = req.body;
     if (!user_id) return res.status(400).json({ error: 'User ID required' });
@@ -235,7 +235,7 @@ router.post('/:id/add-member', authenticate, authorize('admin', 'manager'), asyn
 
 
 // Reinstate revoked portal access
-router.post('/:id/access/:userId/reinstate', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/:id/access/:userId/reinstate', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const result = await query(
       'UPDATE portal_access SET is_active=true WHERE portal_id=$1 AND user_id=$2 RETURNING *',
@@ -249,7 +249,7 @@ router.post('/:id/access/:userId/reinstate', authenticate, authorize('admin', 'm
 });
 
 // Update portal access (permission, projects, expiry)
-router.patch('/:id/access/:userId', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.patch('/:id/access/:userId', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { permission, project_ids, space_ids, company, expires_days } = req.body;
     const fields = []; const params = []; let idx = 1;

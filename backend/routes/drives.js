@@ -28,7 +28,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // Test connection (without mounting)
-router.post('/test', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/test', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { host, share_name, username, password, domain } = req.body;
     if (!host) return res.status(400).json({ error: 'Host required' });
@@ -40,7 +40,7 @@ router.post('/test', authenticate, authorize('admin', 'manager'), async (req, re
 });
 
 // List available shares on a server
-router.post('/list-shares', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/list-shares', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { host, username, password, domain } = req.body;
     if (!host) return res.status(400).json({ error: 'Host required' });
@@ -52,7 +52,7 @@ router.post('/list-shares', authenticate, authorize('admin', 'manager'), async (
 });
 
 // Add and mount a drive
-router.post('/', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { name, server_host, share_name, username, password, domain, auto_mount, read_only } = req.body;
     if (!name || !server_host || !share_name) return res.status(400).json({ error: 'Name, host, and share name required' });
@@ -85,7 +85,7 @@ router.post('/', authenticate, authorize('admin', 'manager'), async (req, res) =
 });
 
 // Connect (mount) a drive
-router.post('/:id/connect', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/:id/connect', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { password } = req.body;
     const driveRes = await query('SELECT * FROM drives WHERE id=$1 AND org_id=$2', [req.params.id, req.user.org_id]);
@@ -100,7 +100,7 @@ router.post('/:id/connect', authenticate, authorize('admin', 'manager'), async (
 });
 
 // Disconnect (unmount) a drive
-router.post('/:id/disconnect', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/:id/disconnect', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     await unmountDrive(req.params.id);
     res.json({ success: true });
@@ -156,7 +156,7 @@ router.post('/:id/import', authenticate, async (req, res) => {
 });
 
 // Rescan drive stats
-router.post('/:id/scan', authenticate, authorize('admin', 'manager'), async (req, res) => {
+router.post('/:id/scan', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const result = await scanDrive(req.params.id);
     res.json(result);
