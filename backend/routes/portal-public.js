@@ -16,11 +16,12 @@ function generatePortalToken(user, portalId) {
 
 function portalAuth(req, res, next) {
   const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) {
+  const queryToken = req.query.token;
+  if ((!header || !header.startsWith('Bearer ')) && !queryToken) {
     return res.status(401).json({ error: 'Authentication required' });
   }
   try {
-    const token = header.split(' ')[1];
+    const token = queryToken || header.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     if (!decoded.is_portal) return res.status(403).json({ error: 'Portal access required' });
     req.user = decoded;
@@ -185,7 +186,7 @@ router.get('/:slug/projects/:projectId/files', portalAuth, async (req, res) => {
     if (!hasProjectAccess && !hasSpaceAccess) return res.status(403).json({ error: 'No access to this project' });
 
     const parentId = req.query.parent_id || null;
-    let sql = `SELECT f.*, u.name as owner_name FROM files f LEFT JOIN users u ON f.owner_id = u.id
+    let sql = `SELECT f.*, u.name as owner_name, lu.name as locked_by_name FROM files f LEFT JOIN users u ON f.owner_id = u.id LEFT JOIN users lu ON f.locked_by = lu.id
                WHERE f.project_id=$1 AND f.is_trashed=false`;
     const params = [req.params.projectId];
     let idx = 2;
@@ -357,7 +358,7 @@ router.get('/:slug/files/:fileId/preview', portalAuth, async (req, res) => {
       res.writeHead(206, { 'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Accept-Ranges': 'bytes', 'Content-Length': chunkSize, 'Content-Type': mimeType });
       stream.pipe(res);
     } else {
-      res.set({ 'Content-Type': mimeType, 'Content-Length': stat.size, 'Content-Disposition': 'inline; filename="' + file.name.replace(/"/g, '\\"') + '"', 'Cache-Control': 'private, max-age=3600' });
+      res.set({ 'Content-Type': mimeType, 'Content-Length': stat.size, 'Cache-Control': 'private, max-age=3600' });
       fs.default.createReadStream(file.storage_path).pipe(res);
     }
   } catch (e) {
@@ -565,6 +566,170 @@ router.post('/:slug/otp/verify', async (req, res) => {
   } catch (e) {
     logger.error('OTP verify error:', e);
     res.status(500).json({ error: 'Verification failed' });
+  }
+});
+
+
+// ─── Portal: Check out file (lock) ────────────────────────────────────
+router.post('/:slug/files/:fileId/checkout', portalAuth, async (req, res) => {
+  try {
+    const accessRes = await query(
+      'SELECT permission FROM portal_access WHERE portal_id=$1 AND user_id=$2 AND is_active=true',
+      [req.user.portal_id, req.user.id]
+    );
+    if (!accessRes.rows.length || accessRes.rows[0].permission !== 'edit') {
+      return res.status(403).json({ error: 'Edit permission required to check out files' });
+    }
+
+    const fileRes = await query('SELECT * FROM files WHERE id=$1 AND is_trashed=false', [req.params.fileId]);
+    if (!fileRes.rows.length) return res.status(404).json({ error: 'File not found' });
+    const file = fileRes.rows[0];
+
+    if (file.locked_by && file.locked_by !== req.user.id) {
+      const lockerRes = await query('SELECT name FROM users WHERE id=$1', [file.locked_by]);
+      const lockerName = lockerRes.rows[0]?.name || 'another user';
+      return res.status(409).json({ error: 'File is checked out by ' + lockerName + ' since ' + new Date(file.locked_at).toLocaleString() });
+    }
+
+    const note = req.body.note || '';
+    await query('UPDATE files SET locked_by=$1, locked_at=NOW(), lock_note=$2 WHERE id=$3',
+      [req.user.id, note, req.params.fileId]);
+
+    res.json({ message: 'File checked out', locked_by: req.user.id, locked_at: new Date() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Portal: Check in file (unlock + optional new version) ───────────
+router.post('/:slug/files/:fileId/checkin', portalAuth, async (req, res) => {
+  try {
+    const fileRes = await query('SELECT * FROM files WHERE id=$1 AND is_trashed=false', [req.params.fileId]);
+    if (!fileRes.rows.length) return res.status(404).json({ error: 'File not found' });
+    const file = fileRes.rows[0];
+
+    if (file.locked_by && file.locked_by !== req.user.id) {
+      return res.status(403).json({ error: 'File is checked out by another user' });
+    }
+
+    // Unlock the file
+    await query('UPDATE files SET locked_by=NULL, locked_at=NULL, lock_note=NULL WHERE id=$1', [req.params.fileId]);
+
+    res.json({ message: 'File checked in successfully' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Portal: Upload new version (check-in with new file) ─────────────
+router.post('/:slug/files/:fileId/new-version', portalAuth, async (req, res) => {
+  try {
+    const accessRes = await query(
+      'SELECT permission FROM portal_access WHERE portal_id=$1 AND user_id=$2 AND is_active=true',
+      [req.user.portal_id, req.user.id]
+    );
+    if (!accessRes.rows.length || accessRes.rows[0].permission !== 'edit') {
+      return res.status(403).json({ error: 'Edit permission required' });
+    }
+
+    const fileRes = await query('SELECT * FROM files WHERE id=$1 AND is_trashed=false', [req.params.fileId]);
+    if (!fileRes.rows.length) return res.status(404).json({ error: 'File not found' });
+    const file = fileRes.rows[0];
+
+    if (file.locked_by && file.locked_by !== req.user.id) {
+      return res.status(403).json({ error: 'File is checked out by another user' });
+    }
+
+    const multer = await import('multer');
+    const path = await import('path');
+    const { v4: uuidv4 } = await import('uuid');
+    const fs = await import('fs');
+
+    const DATA_DIR = process.env.DATA_DIR || '/var/lib/drivesync';
+    const storage = multer.default.diskStorage({
+      destination: (r, f, cb) => cb(null, path.default.join(DATA_DIR, 'temp')),
+      filename: (r, f, cb) => cb(null, uuidv4() + path.default.extname(f.originalname)),
+    });
+    const upload = multer.default({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
+
+    upload.single('file')(req, res, async (err) => {
+      if (err) return res.status(400).json({ error: err.message });
+      if (!req.file) return res.status(400).json({ error: 'No file provided' });
+
+      try {
+        // Save current version to file_versions
+        await query(
+          'INSERT INTO file_versions (file_id, version, size, storage_path, uploaded_by) VALUES ($1,$2,$3,$4,$5)',
+          [file.id, file.version, file.size, file.storage_path, file.owner_id]
+        );
+
+        // Move new file to storage
+        const ext = path.default.extname(req.file.originalname);
+        const newPath = path.default.join(DATA_DIR, 'uploads', req.user.org_id, file.id.substring(0, 2), file.id + '-v' + (file.version + 1) + ext);
+        await fs.promises.mkdir(path.default.dirname(newPath), { recursive: true });
+        await fs.promises.rename(req.file.path, newPath);
+
+        // Update file record
+        const mime = (await import('mime-types')).default;
+        const mimeType = mime.lookup(req.file.originalname) || file.mime_type;
+        await query(
+          'UPDATE files SET version=version+1, size=$1, storage_path=$2, mime_type=$3, locked_by=NULL, locked_at=NULL, lock_note=NULL WHERE id=$4 RETURNING *',
+          [req.file.size, newPath, mimeType, file.id]
+        );
+
+        const updated = await query('SELECT * FROM files WHERE id=$1', [file.id]);
+        res.json({ message: 'New version uploaded', file: updated.rows[0] });
+      } catch (e) {
+        // Clean up temp file
+        try { await fs.promises.unlink(req.file.path); } catch(x) {}
+        res.status(500).json({ error: e.message });
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Portal: Get version history ──────────────────────────────────────
+router.get('/:slug/files/:fileId/versions', portalAuth, async (req, res) => {
+  try {
+    const versions = await query(
+      `SELECT fv.*, u.name as uploaded_by_name FROM file_versions fv
+       LEFT JOIN users u ON fv.uploaded_by = u.id
+       WHERE fv.file_id=$1 ORDER BY fv.version DESC`,
+      [req.params.fileId]
+    );
+    // Also get current file info
+    const current = await query(
+      `SELECT f.version, f.size, f.updated_at, f.locked_by, f.locked_at, f.lock_note, u.name as locked_by_name, o.name as owner_name
+       FROM files f LEFT JOIN users u ON f.locked_by = u.id LEFT JOIN users o ON f.owner_id = o.id WHERE f.id=$1`,
+      [req.params.fileId]
+    );
+    res.json({
+      current: current.rows[0] || null,
+      versions: versions.rows,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Portal: Download specific version ────────────────────────────────
+router.get('/:slug/files/:fileId/versions/:versionId/download', portalAuth, async (req, res) => {
+  try {
+    const accessRes = await query(
+      'SELECT permission FROM portal_access WHERE portal_id=$1 AND user_id=$2 AND is_active=true',
+      [req.user.portal_id, req.user.id]
+    );
+    if (!accessRes.rows.length || accessRes.rows[0].permission === 'view') {
+      return res.status(403).json({ error: 'Download permission required' });
+    }
+
+    const vRes = await query('SELECT fv.*, f.name FROM file_versions fv JOIN files f ON fv.file_id=f.id WHERE fv.id=$1', [req.params.versionId]);
+    if (!vRes.rows.length) return res.status(404).json({ error: 'Version not found' });
+    res.download(vRes.rows[0].storage_path, 'v' + vRes.rows[0].version + '-' + vRes.rows[0].name);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

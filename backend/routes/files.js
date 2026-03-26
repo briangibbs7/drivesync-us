@@ -349,4 +349,52 @@ router.get('/:id/content', async (req, res) => {
   }
 });
 
+
+// Check out file (lock)
+router.post('/:id/checkout', authenticate, async (req, res) => {
+  try {
+    const fileRes = await query('SELECT * FROM files WHERE id=$1 AND org_id=$2 AND is_trashed=false', [req.params.id, req.user.org_id]);
+    if (!fileRes.rows.length) return res.status(404).json({ error: 'File not found' });
+    const file = fileRes.rows[0];
+    if (file.locked_by && file.locked_by !== req.user.id) {
+      const lockerRes = await query('SELECT name FROM users WHERE id=$1', [file.locked_by]);
+      return res.status(409).json({ error: 'Checked out by ' + (lockerRes.rows[0]?.name || 'another user') });
+    }
+    await query('UPDATE files SET locked_by=$1, locked_at=NOW(), lock_note=$2 WHERE id=$3', [req.user.id, req.body.note || '', req.params.id]);
+    await logActivity(req.user.org_id, req.user.id, 'checked_out', 'file', req.params.id, file.name, {}, req);
+    res.json({ message: 'File checked out' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Check in file (unlock)
+router.post('/:id/checkin', authenticate, async (req, res) => {
+  try {
+    const fileRes = await query('SELECT * FROM files WHERE id=$1 AND org_id=$2', [req.params.id, req.user.org_id]);
+    if (!fileRes.rows.length) return res.status(404).json({ error: 'File not found' });
+    if (fileRes.rows[0].locked_by && fileRes.rows[0].locked_by !== req.user.id) {
+      return res.status(403).json({ error: 'Checked out by another user' });
+    }
+    await query('UPDATE files SET locked_by=NULL, locked_at=NULL, lock_note=NULL WHERE id=$1', [req.params.id]);
+    await logActivity(req.user.org_id, req.user.id, 'checked_in', 'file', req.params.id, fileRes.rows[0].name, {}, req);
+    res.json({ message: 'File checked in' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get version history
+router.get('/:id/versions', authenticate, async (req, res) => {
+  try {
+    const versions = await query(
+      `SELECT fv.*, u.name as uploaded_by_name FROM file_versions fv
+       LEFT JOIN users u ON fv.uploaded_by = u.id WHERE fv.file_id=$1 ORDER BY fv.version DESC`,
+      [req.params.id]
+    );
+    const current = await query(
+      `SELECT f.version, f.size, f.updated_at, f.locked_by, f.locked_at, f.lock_note, u.name as locked_by_name
+       FROM files f LEFT JOIN users u ON f.locked_by = u.id WHERE f.id=$1`,
+      [req.params.id]
+    );
+    res.json({ current: current.rows[0], versions: versions.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

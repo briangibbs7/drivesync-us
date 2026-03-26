@@ -168,4 +168,39 @@ router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
   }
 });
 
+
+// Permanently delete user
+router.delete('/:id/permanent', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    if (req.params.id === req.user.id) return res.status(400).json({ error: 'Cannot delete yourself' });
+    
+    // Remove portal access first
+    await query('DELETE FROM portal_access WHERE user_id=$1', [req.params.id]);
+    // Remove space memberships
+    await query('DELETE FROM space_members WHERE user_id=$1', [req.params.id]);
+    // Remove project memberships
+    await query('DELETE FROM project_members WHERE user_id=$1', [req.params.id]);
+    
+    const result = await query('DELETE FROM users WHERE id=$1 AND org_id=$2 RETURNING name, email', [req.params.id, req.user.org_id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'User not found' });
+    
+    await logActivity(req.user.org_id, req.user.id, 'deleted_user', 'user', req.params.id, result.rows[0].name, { email: result.rows[0].email }, req);
+    res.json({ message: 'User permanently deleted' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Reactivate suspended user
+router.post('/:id/reactivate', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const result = await query("UPDATE users SET status='active' WHERE id=$1 AND org_id=$2 RETURNING id, name", [req.params.id, req.user.org_id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'User not found' });
+    await logActivity(req.user.org_id, req.user.id, 'reactivated_user', 'user', req.params.id, result.rows[0].name, {}, req);
+    res.json({ message: 'User reactivated' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;

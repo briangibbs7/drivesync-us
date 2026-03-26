@@ -96,6 +96,12 @@ function PIconChev(){return <svg width="14" height="14" viewBox="0 0 24 24" fill
 function PIconLogout(){return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>;}
 function PIconEye(){return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>;}
 
+function PIconLock(){return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>;}
+function PIconUnlock(){return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>;}
+function PIconHistory(){return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;}
+function PIconUpload(){return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>;}
+
+
 function PFileIcon(props) {
   var t = props.type || "document";
   return <div className={"file-icon "+t}>{t==="folder"?<PIconFolder />:<PIconFile />}</div>;
@@ -321,6 +327,8 @@ function PortalApp(props) {
   var [breadcrumb, setBreadcrumb] = useState([]);
   var [viewingFile, setViewingFile] = useState(null);
   var [previewFile, setPreviewFile] = useState(null);
+  var [versionFile, setVersionFile] = useState(null);
+  var [shareFile, setShareFile] = useState(null);
   var portalFileInput = useRef(null);
   var notify = useNotify();
 
@@ -502,9 +510,11 @@ function PortalApp(props) {
                   <thead><tr><th>Name</th><th>Modified</th><th>Size</th><th>Owner</th><th style={{width:120}}>Actions</th></tr></thead>
                   <tbody>{files.map(function(f){return(
                     <tr key={f.id}>
-                      <td><div className="file-row" style={{cursor:f.is_folder||(f.name&&f.name.endsWith(".html"))?"pointer":"default"}} onClick={function(){openFolder(f);}}>
+                      <td><div className="file-row" style={{cursor:f.is_folder||canPortalPreview(f.mime_type,f.name)?"pointer":"default"}} onClick={function(){openFolder(f);}}>
                         <PFileIcon type={fileType(f.mime_type,f.is_folder)} />
                         <span>{f.name}</span>
+                        {f.locked_by&&<span style={{display:"inline-flex",alignItems:"center",gap:3,padding:"1px 6px",borderRadius:8,fontSize:9,fontWeight:600,background:"rgba(251,191,36,0.1)",color:"#FBBF24",marginLeft:6}}><PIconLock /> {f.locked_by_name||"Locked"}</span>}
+                        {!f.is_folder&&f.version>1&&<span style={{fontSize:9,padding:"1px 5px",borderRadius:6,background:"rgba(79,142,247,0.1)",color:"var(--accent)",fontWeight:600,marginLeft:4}}>v{f.version}</span>}
                       </div></td>
                       <td style={{color:"var(--t2)"}}>{fmtTime(f.updated_at)}</td>
                       <td style={{color:"var(--t3)"}}>{f.is_folder?"—":fmtSize(f.size)}</td>
@@ -512,6 +522,7 @@ function PortalApp(props) {
                       <td><div style={{display:"flex",gap:4}}>
                         {!f.is_folder && canPortalPreview(f.mime_type,f.name) && <button className="p-btn p-btn-ghost p-btn-sm" onClick={function(){if(f.mime_type==="text/html"||f.name.endsWith(".html")){openFolder(f);}else{setPreviewFile(f);}}} title="Preview"><PIconEye /></button>}
                         {!f.is_folder && permission!=="view" && <button className="p-btn p-btn-ghost p-btn-sm" onClick={function(){downloadFile(f);}} title="Download"><PIconDownload /></button>}
+                        {!f.is_folder && <button className="p-btn p-btn-ghost p-btn-sm" onClick={function(){setVersionFile(f);}} title="Versions"><PIconHistory /></button>}
                       </div></td>
                     </tr>
                   );})}</tbody>
@@ -520,6 +531,8 @@ function PortalApp(props) {
             }
           </div>}
         </div>
+      {shareFile && React.createElement(PortalShareModal, {file:shareFile, onClose:function(){setShareFile(null);}})}
+      {versionFile && React.createElement(VersionPanel, {file:versionFile, onClose:function(){setVersionFile(null);}, permission:permission, onRefresh:function(){loadProjectFiles(activeProject.id, parentId);}})}
       {previewFile && React.createElement(PortalPreviewModal, {file:previewFile, onClose:function(){setPreviewFile(null);}, permission:permission})}
       </div>
     </div>
@@ -601,6 +614,351 @@ function canPortalPreview(mime, name) {
   return false;
 }
 
+
+
+function PortalShareModal(props) {
+  var file = props.file;
+  var onClose = props.onClose;
+  var [form, setForm] = useState({recipient_email:"",permission:"download",expires_days:"30",password:""});
+  var [creating, setCreating] = useState(false);
+  var [created, setCreated] = useState(null);
+  var notify = useNotify();
+
+  function create() {
+    setCreating(true);
+    var body = {file_id:file.id, permission:form.permission, expires_days:form.expires_days?parseInt(form.expires_days):null};
+    if (form.recipient_email) body.recipient_email = form.recipient_email;
+    if (form.password) body.password = form.password;
+    // Use main API with portal token
+    var token = getPToken();
+    fetch("/api/shares", {method:"POST", headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json"}, body:JSON.stringify(body)})
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,data:d};});})
+      .then(function(r){
+        if(!r.ok) throw new Error(r.data.error);
+        setCreated(r.data);
+        notify("Share link created!","ok");
+      })
+      .catch(function(e){notify(e.message,"error");})
+      .finally(function(){setCreating(false);});
+  }
+
+  function copyLink() {
+    if (!created) return;
+    var url = window.location.origin + "/share/" + created.token;
+    navigator.clipboard.writeText(url).then(function(){notify("Link copied!","ok");}).catch(function(){notify("Copy the link manually","error");});
+  }
+
+  var shareUrl = created ? window.location.origin + "/share/" + created.token : "";
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:250,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:16,padding:28,width:460,maxWidth:"100%",maxHeight:"90vh",overflow:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <h3 style={{fontSize:16,fontWeight:700}}>Share File</h3>
+          <button className="p-btn p-btn-ghost p-btn-sm" onClick={onClose}>✕</button>
+        </div>
+
+        {/* File info */}
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--bg3)",borderRadius:8,marginBottom:16}}>
+          <PFileIcon type={fileType(file.mime_type,file.is_folder)} />
+          <div>
+            <div style={{fontSize:13,fontWeight:600}}>{file.name}</div>
+            <div style={{fontSize:11,color:"var(--t3)"}}>{fmtSize(file.size)}</div>
+          </div>
+        </div>
+
+        {created ? (
+          <div>
+            <div style={{background:"rgba(63,185,80,0.08)",border:"1px solid rgba(63,185,80,0.2)",borderRadius:8,padding:"14px 18px",marginBottom:16}}>
+              <div style={{fontSize:14,fontWeight:600,color:"var(--green)",marginBottom:8}}>Link Created!</div>
+              <div style={{display:"flex",gap:8}}>
+                <input className="p-input" readOnly={true} value={shareUrl} style={{fontFamily:"var(--mono)",fontSize:11}} />
+                <button className="p-btn p-btn-primary p-btn-sm" onClick={copyLink}>Copy</button>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,fontSize:12,color:"var(--t2)"}}>
+              <div>Permission: <strong style={{color:"var(--t1)"}}>{created.permission}</strong></div>
+              <div>Expires: <strong style={{color:"var(--t1)"}}>{created.expires_at?new Date(created.expires_at).toLocaleDateString():"Never"}</strong></div>
+            </div>
+            <button className="p-btn p-btn-secondary" style={{width:"100%",marginTop:16}} onClick={onClose}>Done</button>
+          </div>
+        ) : (
+          <div>
+            <div className="p-group">
+              <label className="p-label">Recipient Email (optional)</label>
+              <input className="p-input" value={form.recipient_email} onChange={function(e){setForm({...form,recipient_email:e.target.value});}} placeholder="Leave blank for public link" />
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div className="p-group">
+                <label className="p-label">Permission</label>
+                <select className="p-input" value={form.permission} onChange={function(e){setForm({...form,permission:e.target.value});}}>
+                  <option value="view">View only</option>
+                  <option value="download">Download</option>
+                </select>
+              </div>
+              <div className="p-group">
+                <label className="p-label">Expires</label>
+                <select className="p-input" value={form.expires_days} onChange={function(e){setForm({...form,expires_days:e.target.value});}}>
+                  <option value="7">7 days</option>
+                  <option value="30">30 days</option>
+                  <option value="90">90 days</option>
+                  <option value="">Never</option>
+                </select>
+              </div>
+            </div>
+            <div className="p-group">
+              <label className="p-label">Password (optional)</label>
+              <input className="p-input" type="password" value={form.password} onChange={function(e){setForm({...form,password:e.target.value});}} placeholder="No password" />
+            </div>
+            <button className="p-btn p-btn-primary" style={{width:"100%",marginTop:8}} onClick={create} disabled={creating}>{creating?"Creating...":"Create Share Link"}</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function VersionPanel(props) {
+  var file = props.file;
+  var onClose = props.onClose;
+  var permission = props.permission;
+  var onRefresh = props.onRefresh;
+  var [versions, setVersions] = useState([]);
+  var [current, setCurrent] = useState(null);
+  var [loading, setLoading] = useState(true);
+  var versionInput = useRef(null);
+  var notify = useNotify();
+  var slug = getPortalSlug();
+
+  function loadVersions() {
+    setLoading(true);
+    pFetch("/files/" + file.id + "/versions")
+      .then(function(d) { setVersions(d.versions || []); setCurrent(d.current || null); })
+      .catch(function(e) { notify(e.message, "error"); })
+      .finally(function() { setLoading(false); });
+  }
+  useEffect(loadVersions, [file.id]);
+
+  function checkout() {
+    pFetch("/files/" + file.id + "/checkout", { method: "POST", body: {} })
+      .then(function() { notify("File checked out — you now have exclusive edit access", "ok"); loadVersions(); if(onRefresh) onRefresh(); })
+      .catch(function(e) { notify(e.message, "error"); });
+  }
+
+  function checkin() {
+    pFetch("/files/" + file.id + "/checkin", { method: "POST" })
+      .then(function() { notify("File checked in", "ok"); loadVersions(); if(onRefresh) onRefresh(); })
+      .catch(function(e) { notify(e.message, "error"); });
+  }
+
+  function uploadNewVersion(e) {
+    var fl = e.target.files; if (!fl || !fl.length) return;
+    var fd = new FormData();
+    fd.append("file", fl[0]);
+    pFetch("/files/" + file.id + "/new-version", { method: "POST", body: fd })
+      .then(function() { notify("New version uploaded and checked in!", "ok"); loadVersions(); if(onRefresh) onRefresh(); })
+      .catch(function(e) { notify(e.message, "error"); });
+    e.target.value = "";
+  }
+
+  function downloadVersion(vId) {
+    var token = getPToken();
+    window.open(PAPI + "/" + slug + "/files/" + file.id + "/versions/" + vId + "/download?token=" + token, "_blank");
+  }
+
+  var isLockedByMe = current && current.locked_by === (JSON.parse(sessionStorage.getItem("portal_user") || "{}")).id;
+  var isLockedByOther = current && current.locked_by && !isLockedByMe;
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:200,display:"flex",justifyContent:"flex-end"}}>
+      <div style={{width:480,maxWidth:"100%",background:"var(--bg2)",borderLeft:"1px solid var(--border2)",display:"flex",flexDirection:"column",height:"100%"}}>
+        <div style={{padding:"16px 20px",borderBottom:"1px solid var(--border2)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <div style={{fontSize:15,fontWeight:700}}>Version History</div>
+            <div style={{fontSize:12,color:"var(--t3)"}}>{file.name}</div>
+          </div>
+          <button className="p-btn p-btn-ghost p-btn-sm" onClick={onClose}><PIconBack /> Close</button>
+        </div>
+
+        {/* Lock Status */}
+        <div style={{padding:"14px 20px",borderBottom:"1px solid var(--border2)",background:current&&current.locked_by?"rgba(251,191,36,0.05)":"transparent"}}>
+          {current && current.locked_by ? (
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <PIconLock />
+                <div>
+                  <div style={{fontSize:13,fontWeight:600,color:"var(--yellow)"}}>Checked Out</div>
+                  <div style={{fontSize:11,color:"var(--t3)"}}>{current.locked_by_name} · {current.locked_at ? fmtTime(current.locked_at) : ""}</div>
+                  {current.lock_note && <div style={{fontSize:11,color:"var(--t3)",fontStyle:"italic"}}>{current.lock_note}</div>}
+                </div>
+              </div>
+              {isLockedByMe && <div style={{display:"flex",gap:6}}>
+                <button className="p-btn p-btn-secondary p-btn-sm" onClick={function(){versionInput.current&&versionInput.current.click();}}><PIconUpload /> Upload New Version</button>
+                <button className="p-btn p-btn-primary p-btn-sm" onClick={checkin}><PIconUnlock /> Check In</button>
+                <input ref={versionInput} type="file" style={{display:"none"}} onChange={uploadNewVersion} />
+              </div>}
+            </div>
+          ) : (
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <PIconUnlock />
+                <div>
+                  <div style={{fontSize:13,fontWeight:600,color:"var(--green)"}}>Available</div>
+                  <div style={{fontSize:11,color:"var(--t3)"}}>Not checked out by anyone</div>
+                </div>
+              </div>
+              {permission === "edit" && <button className="p-btn p-btn-primary p-btn-sm" onClick={checkout}><PIconLock /> Check Out</button>}
+            </div>
+          )}
+        </div>
+
+        {/* Current Version */}
+        <div style={{padding:"14px 20px",borderBottom:"1px solid var(--border2)"}}>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--t3)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Current Version</div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div>
+              <span style={{fontSize:20,fontWeight:700,color:"var(--accent)"}}>v{current ? current.version : "?"}</span>
+              <span style={{fontSize:12,color:"var(--t3)",marginLeft:8}}>{current ? fmtSize(parseInt(current.size)) : ""} · {current ? fmtTime(current.updated_at) : ""}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Version List */}
+        <div style={{flex:1,overflow:"auto",padding:"14px 20px"}}>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--t3)",textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>Previous Versions ({versions.length})</div>
+          {loading ? <div style={{textAlign:"center",padding:20,color:"var(--t3)"}}>Loading...</div> :
+            versions.length === 0 ? <div style={{textAlign:"center",padding:30,color:"var(--t3)",fontSize:13}}>No previous versions</div> :
+            versions.map(function(v) { return (
+              <div key={v.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:"var(--bg3)",borderRadius:8,marginBottom:8,border:"1px solid var(--border2)"}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:600}}>Version {v.version}</div>
+                  <div style={{fontSize:11,color:"var(--t3)"}}>{fmtSize(v.size)} · {fmtTime(v.created_at)} · {v.uploaded_by_name || "Unknown"}</div>
+                </div>
+                {permission !== "view" && <button className="p-btn p-btn-ghost p-btn-sm" onClick={function(){downloadVersion(v.id);}}><PIconDownload /> Download</button>}
+              </div>
+            );})
+          }
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function PortalPDFViewer(props) {
+  var containerRef = useRef(null);
+  var [numPages, setNumPages] = useState(0);
+  var [currentPage, setCurrentPage] = useState(1);
+  var [scale, setScale] = useState(1.2);
+  var [loading, setLoading] = useState(true);
+  var [error, setError] = useState(null);
+  var pdfDoc = useRef(null);
+
+  useEffect(function() {
+    // Load PDF.js from CDN
+    var script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    script.onload = function() {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      loadPDF();
+    };
+    script.onerror = function() { setError("Failed to load PDF viewer"); setLoading(false); };
+    document.head.appendChild(script);
+
+    return function() {
+      if (pdfDoc.current) { pdfDoc.current.destroy(); pdfDoc.current = null; }
+    };
+  }, []);
+
+  function loadPDF() {
+    setLoading(true);
+    window.pdfjsLib.getDocument(props.url).promise.then(function(pdf) {
+      pdfDoc.current = pdf;
+      setNumPages(pdf.numPages);
+      setLoading(false);
+      renderPage(1, pdf);
+    }).catch(function(e) {
+      setError("Failed to load PDF: " + e.message);
+      setLoading(false);
+    });
+  }
+
+  function renderPage(num, pdf) {
+    var doc = pdf || pdfDoc.current;
+    if (!doc || !containerRef.current) return;
+    doc.getPage(num).then(function(page) {
+      // Clear previous pages if re-rendering single page
+      containerRef.current.innerHTML = "";
+      var viewport = page.getViewport({ scale: scale });
+      var canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      canvas.style.display = "block";
+      canvas.style.margin = "0 auto 16px";
+      canvas.style.borderRadius = "4px";
+      canvas.style.boxShadow = "0 2px 12px rgba(0,0,0,0.4)";
+      containerRef.current.appendChild(canvas);
+      var ctx = canvas.getContext("2d");
+      page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function() {
+        setCurrentPage(num);
+      });
+    });
+  }
+
+  function renderAllPages() {
+    if (!pdfDoc.current || !containerRef.current) return;
+    containerRef.current.innerHTML = "";
+    var doc = pdfDoc.current;
+    for (var i = 1; i <= doc.numPages; i++) {
+      (function(pageNum) {
+        doc.getPage(pageNum).then(function(page) {
+          var viewport = page.getViewport({ scale: scale });
+          var canvas = document.createElement("canvas");
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          canvas.style.display = "block";
+          canvas.style.margin = "0 auto 16px";
+          canvas.style.borderRadius = "4px";
+          canvas.style.boxShadow = "0 2px 12px rgba(0,0,0,0.3)";
+          containerRef.current.appendChild(canvas);
+          page.render({ canvasContext: canvas.getContext("2d"), viewport: viewport });
+        });
+      })(i);
+    }
+  }
+
+  useEffect(function() {
+    if (pdfDoc.current && !loading) renderAllPages();
+  }, [scale, loading]);
+
+  function zoomIn() { setScale(function(s) { return Math.min(s + 0.2, 3); }); }
+  function zoomOut() { setScale(function(s) { return Math.max(s - 0.2, 0.4); }); }
+
+  if (error) return (
+    React.createElement("div", {style:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:16}},
+      React.createElement("div", {style:{fontSize:48}}, "📄"),
+      React.createElement("div", {style:{fontSize:16,fontWeight:600,color:"var(--t1)"}}, "Cannot display PDF"),
+      React.createElement("div", {style:{fontSize:13,color:"var(--t3)"}}, error),
+      React.createElement("a", {href:props.url,target:"_blank",rel:"noopener",className:"p-btn p-btn-primary",style:{textDecoration:"none"}}, "Open in new tab")
+    )
+  );
+
+  return React.createElement("div", {style:{display:"flex",flexDirection:"column",width:"100%",height:"100%"}},
+    React.createElement("div", {style:{display:"flex",alignItems:"center",justifyContent:"center",gap:12,padding:"8px 16px",background:"var(--bg2)",borderRadius:"8px 8px 0 0",borderBottom:"1px solid var(--border2)",flexShrink:0}},
+      React.createElement("button", {className:"p-btn p-btn-ghost p-btn-sm",onClick:zoomOut}, "−"),
+      React.createElement("span", {style:{fontSize:12,color:"var(--t2)",minWidth:50,textAlign:"center"}}, Math.round(scale*100)+"%"),
+      React.createElement("button", {className:"p-btn p-btn-ghost p-btn-sm",onClick:zoomIn}, "+"),
+      React.createElement("span", {style:{width:1,height:16,background:"var(--border2)",margin:"0 4px"}}),
+      React.createElement("span", {style:{fontSize:12,color:"var(--t3)"}}, numPages+" pages"),
+      React.createElement("span", {style:{width:1,height:16,background:"var(--border2)",margin:"0 4px"}}),
+      React.createElement("a", {href:props.url,target:"_blank",rel:"noopener",style:{fontSize:12,color:"var(--accent)",textDecoration:"none"}}, "Open in tab ↗")
+    ),
+    loading ?
+      React.createElement("div", {style:{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--t3)"}}, "Loading PDF...") :
+      React.createElement("div", {ref:containerRef,style:{flex:1,overflow:"auto",padding:"20px",background:"#3a3a3a"}})
+  );
+}
+
 function PortalPreviewModal(props) {
   var file = props.file;
   var onClose = props.onClose;
@@ -635,7 +993,7 @@ function PortalPreviewModal(props) {
       </div>
       <div style={{flex:1,overflow:"auto",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
         {previewType === "image" && <img src={previewUrl} alt={file.name} style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain",borderRadius:8}} />}
-        {previewType === "pdf" && <iframe src={previewUrl+"#toolbar=1"} style={{width:"100%",height:"100%",border:"none",borderRadius:8,background:"white"}} title={file.name} />}
+        {previewType === "pdf" && React.createElement(PortalPDFViewer, {url: previewUrl})}
         {previewType === "video" && <video controls autoPlay style={{maxWidth:"100%",maxHeight:"100%",borderRadius:8}}><source src={previewUrl} type={file.mime_type} /></video>}
         {previewType === "audio" && <div style={{background:"var(--bg2)",borderRadius:16,padding:40,textAlign:"center"}}><div style={{fontSize:48,marginBottom:16}}>🎵</div><div style={{fontSize:16,fontWeight:600,marginBottom:20}}>{file.name}</div><audio controls autoPlay style={{width:"100%"}}><source src={previewUrl} type={file.mime_type} /></audio></div>}
         {previewType === "text" && <pre style={{width:"100%",maxWidth:900,height:"100%",overflow:"auto",padding:20,background:"var(--bg2)",borderRadius:8,fontSize:13,lineHeight:1.6,fontFamily:"var(--mono)",color:"var(--t2)",whiteSpace:"pre-wrap"}}>{textContent || "Loading..."}</pre>}

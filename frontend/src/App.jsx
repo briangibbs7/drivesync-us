@@ -456,6 +456,64 @@ function getPreviewUrl(fileId) {
   return API + "/files/" + fileId + "/preview?token=" + getToken();
 }
 
+function PDFViewer(props) {
+  var containerRef = useRef(null);
+  var [numPages, setNumPages] = useState(0);
+  var [scale, setScale] = useState(1.2);
+  var [loading, setLoading] = useState(true);
+  var [error, setError] = useState(null);
+  var pdfDoc = useRef(null);
+
+  useEffect(function() {
+    var script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    script.onload = function() {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      window.pdfjsLib.getDocument(props.url).promise.then(function(pdf) {
+        pdfDoc.current = pdf; setNumPages(pdf.numPages); setLoading(false);
+      }).catch(function(e) { setError(e.message); setLoading(false); });
+    };
+    document.head.appendChild(script);
+    return function() { if (pdfDoc.current) pdfDoc.current.destroy(); };
+  }, []);
+
+  useEffect(function() {
+    if (!pdfDoc.current || loading || !containerRef.current) return;
+    containerRef.current.innerHTML = "";
+    for (var i = 1; i <= pdfDoc.current.numPages; i++) {
+      (function(n) {
+        pdfDoc.current.getPage(n).then(function(page) {
+          var vp = page.getViewport({scale:scale});
+          var c = document.createElement("canvas");
+          c.width=vp.width; c.height=vp.height;
+          c.style.cssText="display:block;margin:0 auto 16px;border-radius:4px;box-shadow:0 2px 12px rgba(0,0,0,0.4)";
+          containerRef.current.appendChild(c);
+          page.render({canvasContext:c.getContext("2d"),viewport:vp});
+        });
+      })(i);
+    }
+  }, [scale, loading]);
+
+  if (error) return <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:16}}><div style={{fontSize:48}}>📄</div><div style={{fontSize:16,fontWeight:600}}>Cannot display PDF</div><a href={props.url} target="_blank" rel="noopener" className="btn btn-primary" style={{textDecoration:"none"}}>Open in tab</a></div>;
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",width:"100%",height:"100%"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:12,padding:"8px 16px",background:"var(--bg-secondary)",borderRadius:"var(--radius) var(--radius) 0 0",borderBottom:"1px solid var(--border-subtle)",flexShrink:0}}>
+        <button className="btn btn-ghost btn-sm" onClick={function(){setScale(function(s){return Math.max(s-0.2,0.4);});}}>−</button>
+        <span style={{fontSize:12,color:"var(--text-secondary)",minWidth:50,textAlign:"center"}}>{Math.round(scale*100)}%</span>
+        <button className="btn btn-ghost btn-sm" onClick={function(){setScale(function(s){return Math.min(s+0.2,3);});}}>+</button>
+        <span style={{width:1,height:16,background:"var(--border-subtle)"}} />
+        <span style={{fontSize:12,color:"var(--text-tertiary)"}}>{numPages} pages</span>
+        <span style={{width:1,height:16,background:"var(--border-subtle)"}} />
+        <a href={props.url} target="_blank" rel="noopener" style={{fontSize:12,color:"var(--accent)",textDecoration:"none"}}>Open in tab ↗</a>
+      </div>
+      {loading ? <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--text-tertiary)"}}>Loading PDF...</div> :
+        <div ref={containerRef} style={{flex:1,overflow:"auto",padding:20,background:"#3a3a3a"}} />
+      }
+    </div>
+  );
+}
+
 function FilePreviewModal(props) {
   var file = props.file;
   var onClose = props.onClose;
@@ -532,9 +590,7 @@ function FilePreviewModal(props) {
         )}
 
         {/* PDF */}
-        {previewType === "pdf" && (
-          <iframe src={previewUrl + "#toolbar=1&navpanes=0"} style={{width:"100%",height:"100%",border:"none",borderRadius:"var(--radius)",background:"white"}} title={file.name} />
-        )}
+        {previewType === "pdf" && React.createElement(PDFViewer, {url: previewUrl})}
 
         {/* Video */}
         {previewType === "video" && (
@@ -656,6 +712,209 @@ function DashboardPage() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   SHARE FILE MODAL (used across all file browsers)
+   ═══════════════════════════════════════════════════════════════════════════ */
+function ShareFileModal(props) {
+  var file = props.file;
+  var onClose = props.onClose;
+  var [form, setForm] = useState({recipient_email:"",permission:"download",expires_days:"30",password:""});
+  var [creating, setCreating] = useState(false);
+  var [created, setCreated] = useState(null);
+  var notify = useNotify();
+
+  function create() {
+    setCreating(true);
+    var body = {file_id:file.id, permission:form.permission, expires_days:form.expires_days?parseInt(form.expires_days):null};
+    if (form.recipient_email) body.recipient_email = form.recipient_email;
+    if (form.password) body.password = form.password;
+    apiFetch("/shares",{method:"POST",body:body})
+      .then(function(d){
+        setCreated(d);
+        notify("Share link created!","success");
+      })
+      .catch(function(e){notify(e.message,"error");})
+      .finally(function(){setCreating(false);});
+  }
+
+  function copyLink() {
+    if (!created) return;
+    var url = window.location.origin + "/share/" + created.token;
+    navigator.clipboard.writeText(url).then(function(){notify("Link copied!","success");}).catch(function(){
+      // Fallback
+      var input = document.createElement("input");
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+      notify("Link copied!","success");
+    });
+  }
+
+  var shareUrl = created ? window.location.origin + "/share/" + created.token : "";
+
+  return React.createElement(Modal, {open:true, onClose:onClose, title:"Share — "+file.name, footer:
+    React.createElement(React.Fragment, null,
+      React.createElement("button",{className:"btn btn-secondary",onClick:onClose},"Close"),
+      !created && React.createElement("button",{className:"btn btn-primary",onClick:create,disabled:creating},creating?"Creating...":"Create Share Link")
+    )
+  },
+    created ?
+      React.createElement("div",null,
+        React.createElement("div",{style:{background:"var(--success-bg)",border:"1px solid rgba(52,211,153,0.2)",borderRadius:"var(--radius)",padding:"16px 20px",marginBottom:16}},
+          React.createElement("div",{style:{fontSize:14,fontWeight:600,color:"var(--success)",marginBottom:4}},"Share link created!"),
+          React.createElement("div",{style:{display:"flex",alignItems:"center",gap:8,marginTop:8}},
+            React.createElement("input",{className:"form-input",readOnly:true,value:shareUrl,style:{fontFamily:"var(--mono)",fontSize:12}}),
+            React.createElement("button",{className:"btn btn-primary btn-sm",onClick:copyLink},"Copy")
+          )
+        ),
+        React.createElement("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,fontSize:13}},
+          React.createElement("div",null,React.createElement("span",{style:{color:"var(--text-tertiary)"}},"Permission: "),React.createElement("strong",null,created.permission)),
+          React.createElement("div",null,React.createElement("span",{style:{color:"var(--text-tertiary)"}},"Expires: "),React.createElement("strong",null,created.expires_at?new Date(created.expires_at).toLocaleDateString():"Never")),
+          form.recipient_email && React.createElement("div",null,React.createElement("span",{style:{color:"var(--text-tertiary)"}},"Sent to: "),React.createElement("strong",null,form.recipient_email)),
+          form.password && React.createElement("div",null,React.createElement("span",{style:{color:"var(--text-tertiary)"}},"Password: "),React.createElement("strong",null,"Protected"))
+        )
+      ) :
+      React.createElement("div",null,
+        React.createElement("div",{style:{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:"var(--bg-tertiary)",borderRadius:"var(--radius-sm)",marginBottom:16}},
+          React.createElement(FileIcon,{type:fileType(file.mime_type,file.is_folder)}),
+          React.createElement("div",null,
+            React.createElement("div",{style:{fontSize:13,fontWeight:600}},file.name),
+            React.createElement("div",{style:{fontSize:11,color:"var(--text-tertiary)"}},fmtSize(file.size))
+          )
+        ),
+        React.createElement("div",{className:"form-group"},
+          React.createElement("label",{className:"form-label"},"Recipient Email (optional)"),
+          React.createElement("input",{className:"form-input",value:form.recipient_email,onChange:function(e){setForm({...form,recipient_email:e.target.value});},placeholder:"external@company.com — leave blank for public link"})
+        ),
+        React.createElement("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
+          React.createElement("div",{className:"form-group"},
+            React.createElement("label",{className:"form-label"},"Permission"),
+            React.createElement("select",{className:"form-select",value:form.permission,onChange:function(e){setForm({...form,permission:e.target.value});}},
+              React.createElement("option",{value:"view"},"View only"),
+              React.createElement("option",{value:"download"},"Download"),
+              React.createElement("option",{value:"edit"},"Edit")
+            )
+          ),
+          React.createElement("div",{className:"form-group"},
+            React.createElement("label",{className:"form-label"},"Expires"),
+            React.createElement("select",{className:"form-select",value:form.expires_days,onChange:function(e){setForm({...form,expires_days:e.target.value});}},
+              React.createElement("option",{value:"7"},"7 days"),
+              React.createElement("option",{value:"30"},"30 days"),
+              React.createElement("option",{value:"90"},"90 days"),
+              React.createElement("option",{value:""},"Never")
+            )
+          )
+        ),
+        React.createElement("div",{className:"form-group"},
+          React.createElement("label",{className:"form-label"},"Password Protection (optional)"),
+          React.createElement("input",{className:"form-input",type:"password",value:form.password,onChange:function(e){setForm({...form,password:e.target.value});},placeholder:"Leave blank for no password"})
+        )
+      )
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UPLOAD PROGRESS SYSTEM
+   ═══════════════════════════════════════════════════════════════════════════ */
+var UploadContext = React.createContext({uploads:[],uploadFiles:function(){}});
+
+function UploadProvider(props) {
+  var [uploads, setUploads] = useState([]);
+
+  function uploadFiles(files, opts) {
+    if (!files || !files.length) return Promise.resolve();
+    var id = Date.now() + Math.random();
+    var fd = new FormData();
+    var totalSize = 0;
+    var names = [];
+    for (var i = 0; i < files.length; i++) {
+      fd.append("files", files[i]);
+      totalSize += files[i].size;
+      names.push(files[i].name);
+    }
+    if (opts && opts.project_id) fd.append("project_id", opts.project_id);
+    if (opts && opts.space_id) fd.append("space_id", opts.space_id);
+    if (opts && opts.parent_id) fd.append("parent_id", opts.parent_id);
+
+    var entry = {id:id, names:names, totalSize:totalSize, loaded:0, percent:0, status:"uploading", error:null};
+    setUploads(function(u) { return u.concat(entry); });
+
+    return new Promise(function(resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open("POST", API + "/files/upload");
+      xhr.setRequestHeader("Authorization", "Bearer " + getToken());
+
+      xhr.upload.onprogress = function(e) {
+        if (e.lengthComputable) {
+          var pct = Math.round((e.loaded / e.total) * 100);
+          setUploads(function(u) { return u.map(function(x) { return x.id === id ? {...x, loaded: e.loaded, percent: pct} : x; }); });
+        }
+      };
+
+      xhr.onload = function() {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          setUploads(function(u) { return u.map(function(x) { return x.id === id ? {...x, percent: 100, status: "complete"} : x; }); });
+          setTimeout(function() { setUploads(function(u) { return u.filter(function(x) { return x.id !== id; }); }); }, 4000);
+          try { resolve(JSON.parse(xhr.responseText)); } catch(e) { resolve(); }
+        } else {
+          var msg = "Upload failed";
+          try { msg = JSON.parse(xhr.responseText).error || msg; } catch(e) {}
+          setUploads(function(u) { return u.map(function(x) { return x.id === id ? {...x, status: "error", error: msg} : x; }); });
+          setTimeout(function() { setUploads(function(u) { return u.filter(function(x) { return x.id !== id; }); }); }, 8000);
+          reject(new Error(msg));
+        }
+      };
+
+      xhr.onerror = function() {
+        setUploads(function(u) { return u.map(function(x) { return x.id === id ? {...x, status: "error", error: "Network error"} : x; }); });
+        setTimeout(function() { setUploads(function(u) { return u.filter(function(x) { return x.id !== id; }); }); }, 8000);
+        reject(new Error("Network error"));
+      };
+
+      xhr.send(fd);
+    });
+  }
+
+  return React.createElement(UploadContext.Provider, {value: {uploads: uploads, uploadFiles: uploadFiles}},
+    props.children,
+    uploads.length > 0 && React.createElement("div", {style: {position:"fixed",bottom:20,right:20,zIndex:300,display:"flex",flexDirection:"column",gap:8,maxWidth:380}},
+      uploads.map(function(u) {
+        var isError = u.status === "error";
+        var isDone = u.status === "complete";
+        var label = u.names.length === 1 ? u.names[0] : u.names.length + " files";
+        if (label.length > 35) label = label.substring(0,32) + "...";
+        return React.createElement("div", {key: u.id, style: {
+          background: isError ? "#2D1215" : isDone ? "#0D2818" : "var(--bg-secondary)",
+          border: "1px solid " + (isError ? "rgba(248,81,73,0.3)" : isDone ? "rgba(52,211,153,0.3)" : "var(--border)"),
+          borderRadius: 12, padding: "12px 16px", minWidth: 300,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+          animation: "slideUp .2s ease"
+        }},
+          React.createElement("div", {style: {display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom: isDone || isError ? 0 : 6}},
+            React.createElement("div", {style: {fontSize:13,fontWeight:600,color: isError ? "var(--danger)" : isDone ? "var(--success)" : "var(--text-primary)"}},
+              isError ? "❌ Upload Failed" : isDone ? "✅ Upload Complete" : "📤 Uploading..."
+            ),
+            React.createElement("span", {style: {fontSize:12,fontWeight:600,color: isError ? "var(--danger)" : isDone ? "var(--success)" : "var(--accent)"}},
+              isError ? "" : u.percent + "%"
+            )
+          ),
+          React.createElement("div", {style: {fontSize:11,color:"var(--text-tertiary)",marginBottom: isDone || isError ? 0 : 6}},
+            isError ? u.error : label
+          ),
+          !isDone && !isError && React.createElement("div", {style: {height:4,background:"var(--bg-active)",borderRadius:2,overflow:"hidden"}},
+            React.createElement("div", {style: {height:"100%",width:u.percent+"%",background:"var(--accent)",borderRadius:2,transition:"width .3s ease"}})
+          )
+        );
+      })
+    )
+  );
+}
+
+function useUpload() { return React.useContext(UploadContext); }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
    PAGE: FILES
    ═══════════════════════════════════════════════════════════════════════════ */
 function FilesPage() {
@@ -668,7 +927,9 @@ function FilesPage() {
   var [showNewFolder, setShowNewFolder] = useState(false);
   var [folderName, setFolderName] = useState("");
   var [showTrash, setShowTrash] = useState(false);
+  var [uploadProgress, setUploadProgress] = useState({active:false,percent:0,label:"",status:"",error:null});
   var [previewFile, setPreviewFile] = useState(null);
+  var [shareFile, setShareFile] = useState(null);
   var fileInput = useRef(null);
   var notify = useNotify();
 
@@ -763,6 +1024,7 @@ function FilesPage() {
                   {showTrash?<button className="btn btn-ghost btn-icon btn-sm" onClick={function(){restoreFile(f);}}><IconUndo /></button>:
                   <React.Fragment>
                     {!f.is_folder&&<button className="btn btn-ghost btn-icon btn-sm" onClick={function(){downloadFile(f);}}><IconDownload /></button>}
+                    {!f.is_folder&&<button className="btn btn-ghost btn-icon btn-sm" onClick={function(){setShareFile(f);}} title="Share"><IconShare /></button>}
                     <button className="btn btn-ghost btn-icon btn-sm" onClick={function(){toggleStar(f);}} style={{color:f.is_starred?"#FBBF24":undefined}}><IconStar filled={f.is_starred} /></button>
                     <button className="btn btn-ghost btn-icon btn-sm" onClick={function(){trashFile(f);}}><IconTrash /></button>
                   </React.Fragment>}
@@ -772,13 +1034,26 @@ function FilesPage() {
           </table></div></div>
       }
 
-{previewFile && React.createElement(FilePreviewModal, {file: previewFile, onClose: function(){setPreviewFile(null);}})}
+{shareFile && React.createElement(ShareFileModal, {file: shareFile, onClose: function(){setShareFile(null);}})}
+      {previewFile && React.createElement(FilePreviewModal, {file: previewFile, onClose: function(){setPreviewFile(null);}})}
 
       <Modal open={showNewFolder} onClose={function(){setShowNewFolder(false);}} title="New Folder" footer={
         <React.Fragment><button className="btn btn-secondary" onClick={function(){setShowNewFolder(false);}}>Cancel</button><button className="btn btn-primary" onClick={createFolder}>Create</button></React.Fragment>
       }>
         <div className="form-group"><label className="form-label">Folder Name</label><input className="form-input" placeholder="Enter name" value={folderName} onChange={function(e){setFolderName(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")createFolder();}} autoFocus /></div>
       </Modal>
+      {/* Upload Progress */}
+      {uploadProgress&&uploadProgress.active&&<div style={{position:"fixed",bottom:20,right:20,zIndex:300,minWidth:320,background:uploadProgress.status==="error"?"#2D1215":uploadProgress.status==="complete"?"#0D2818":"var(--bg-secondary)",border:"1px solid "+(uploadProgress.status==="error"?"rgba(248,81,73,0.3)":uploadProgress.status==="complete"?"rgba(52,211,153,0.3)":"var(--border)"),borderRadius:12,padding:"14px 18px",boxShadow:"0 8px 24px rgba(0,0,0,0.5)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:uploadProgress.status==="complete"||uploadProgress.status==="error"?0:8}}>
+          <div style={{fontSize:13,fontWeight:600,color:uploadProgress.status==="error"?"var(--danger)":uploadProgress.status==="complete"?"var(--success)":"var(--text-primary)"}}>
+            {uploadProgress.status==="error"?"❌ Upload Failed":uploadProgress.status==="complete"?"✅ Upload Complete":"📤 Uploading..."}
+          </div>
+          <span style={{fontSize:13,fontWeight:700,color:uploadProgress.status==="error"?"var(--danger)":uploadProgress.status==="complete"?"var(--success)":"var(--accent)"}}>{uploadProgress.status!=="error"?uploadProgress.percent+"%":""}</span>
+        </div>
+        <div style={{fontSize:11,color:"var(--text-tertiary)",marginBottom:uploadProgress.status==="complete"||uploadProgress.status==="error"?0:8}}>{uploadProgress.status==="error"?uploadProgress.error:uploadProgress.label}</div>
+        {uploadProgress.status==="uploading"&&<div style={{height:4,background:"var(--bg-active)",borderRadius:2,overflow:"hidden"}}><div style={{height:"100%",width:uploadProgress.percent+"%",background:"var(--accent)",borderRadius:2,transition:"width .2s ease"}}></div></div>}
+      </div>}
+
     </div>
   );
 }
@@ -1079,6 +1354,7 @@ function ProjectWorkspace(props) {
   var [members, setMembers] = useState([]);
   var [showSettings, setShowSettings] = useState(false);
   var [editForm, setEditForm] = useState({name:project.name,description:project.description||"",status:project.status,color:project.color||"#4F8EF7"});
+  var [uploadProgress, setUploadProgress] = useState({active:false,percent:0,label:"",status:""});
   var [editingDoc, setEditingDoc] = useState(null);
   var [creatingDoc, setCreatingDoc] = useState(false);
   var [showNewDoc, setShowNewDoc] = useState(false);
@@ -1131,12 +1407,37 @@ function ProjectWorkspace(props) {
 
   function handleUpload(e) {
     var fl=e.target.files; if(!fl||!fl.length) return;
-    var fd=new FormData();
-    for(var i=0;i<fl.length;i++) fd.append("files",fl[i]);
-    fd.append("project_id",project.id);
-    if(parentId) fd.append("parent_id",parentId);
-    apiFetch("/files/upload",{method:"POST",body:fd}).then(function(){notify("Uploaded!","success");loadFiles();loadAllFiles();}).catch(function(err){notify(err.message,"error");});
+    doUpload(fl, {parent_id:parentId,project_id:project.id});
     e.target.value="";
+  }
+
+  function doUpload(files, opts) {
+    var fd=new FormData();
+    var names=[];
+    for(var i=0;i<files.length;i++){fd.append("files",files[i]);names.push(files[i].name);}
+    if(opts.parent_id) fd.append("parent_id",opts.parent_id);
+    if(opts.project_id) fd.append("project_id",opts.project_id);
+    var label=names.length===1?names[0]:names.length+" files";
+    if(label.length>30) label=label.substring(0,27)+"...";
+    setUploadProgress({active:true,percent:0,label:label,status:"uploading"});
+
+    var xhr=new XMLHttpRequest();
+    xhr.open("POST",API+"/files/upload");
+    xhr.setRequestHeader("Authorization","Bearer "+getToken());
+    xhr.upload.onprogress=function(ev){if(ev.lengthComputable){setUploadProgress(function(p){return{...p,percent:Math.round((ev.loaded/ev.total)*100)};});}};
+    xhr.onload=function(){
+      if(xhr.status>=200&&xhr.status<300){
+        setUploadProgress({active:true,percent:100,label:label,status:"complete"});
+        notify("Upload complete!","success");loadFiles();loadAllFiles();
+        setTimeout(function(){setUploadProgress({active:false});},3000);
+      } else {
+        var msg="Upload failed";try{msg=JSON.parse(xhr.responseText).error||msg;}catch(ex){}
+        setUploadProgress({active:true,percent:0,label:label,status:"error",error:msg});
+        notify(msg,"error");setTimeout(function(){setUploadProgress({active:false});},6000);
+      }
+    };
+    xhr.onerror=function(){notify("Network error","error");setUploadProgress({active:false});};
+    xhr.send(fd);
   }
 
   function createFolder() {
@@ -1374,6 +1675,18 @@ function ProjectWorkspace(props) {
         <div className="form-group"><label className="form-label">Color</label><input type="color" className="form-input" style={{height:40,padding:4}} value={editForm.color} onChange={function(e){setEditForm({...editForm,color:e.target.value});}} /></div>
         <div className="form-group"><label className="form-label">Status</label><select className="form-select" value={editForm.status} onChange={function(e){setEditForm({...editForm,status:e.target.value});}}><option value="active">Active</option><option value="completed">Completed</option><option value="archived">Archived</option></select></div>
       </Modal>
+      {/* Upload Progress */}
+      {uploadProgress&&uploadProgress.active&&<div style={{position:"fixed",bottom:20,right:20,zIndex:300,minWidth:320,background:uploadProgress.status==="error"?"#2D1215":uploadProgress.status==="complete"?"#0D2818":"var(--bg-secondary)",border:"1px solid "+(uploadProgress.status==="error"?"rgba(248,81,73,0.3)":uploadProgress.status==="complete"?"rgba(52,211,153,0.3)":"var(--border)"),borderRadius:12,padding:"14px 18px",boxShadow:"0 8px 24px rgba(0,0,0,0.5)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:uploadProgress.status==="complete"||uploadProgress.status==="error"?0:8}}>
+          <div style={{fontSize:13,fontWeight:600,color:uploadProgress.status==="error"?"var(--danger)":uploadProgress.status==="complete"?"var(--success)":"var(--text-primary)"}}>
+            {uploadProgress.status==="error"?"❌ Upload Failed":uploadProgress.status==="complete"?"✅ Upload Complete":"📤 Uploading..."}
+          </div>
+          <span style={{fontSize:13,fontWeight:700,color:uploadProgress.status==="error"?"var(--danger)":uploadProgress.status==="complete"?"var(--success)":"var(--accent)"}}>{uploadProgress.status!=="error"?uploadProgress.percent+"%":""}</span>
+        </div>
+        <div style={{fontSize:11,color:"var(--text-tertiary)",marginBottom:uploadProgress.status==="complete"||uploadProgress.status==="error"?0:8}}>{uploadProgress.status==="error"?uploadProgress.error:uploadProgress.label}</div>
+        {uploadProgress.status==="uploading"&&<div style={{height:4,background:"var(--bg-active)",borderRadius:2,overflow:"hidden"}}><div style={{height:"100%",width:uploadProgress.percent+"%",background:"var(--accent)",borderRadius:2,transition:"width .2s ease"}}></div></div>}
+      </div>}
+
     </div>
   );
 }
@@ -1459,6 +1772,7 @@ function SpaceWorkspace(props) {
   var [creatingDoc, setCreatingDoc] = useState(false);
   var [editingDoc, setEditingDoc] = useState(null);
   var [showSettings, setShowSettings] = useState(false);
+  var [uploadProgress, setUploadProgress] = useState({active:false,percent:0,label:"",status:""});
   var [showAddMember, setShowAddMember] = useState(false);
   var [allUsers, setAllUsers] = useState([]);
   var [addMemberForm, setAddMemberForm] = useState({user_id:"",role:"member"});
@@ -1492,12 +1806,37 @@ function SpaceWorkspace(props) {
   function navTo(idx) { var bc=breadcrumb.slice(0,idx+1); setBreadcrumb(bc); setParentId(bc[bc.length-1].id); }
   function handleUpload(e) {
     var fl=e.target.files; if(!fl||!fl.length) return;
-    var fd=new FormData();
-    for(var i=0;i<fl.length;i++) fd.append("files",fl[i]);
-    fd.append("space_id",space.id);
-    if(parentId) fd.append("parent_id",parentId);
-    apiFetch("/files/upload",{method:"POST",body:fd}).then(function(){notify("Uploaded!","success");loadFiles();loadAllFiles();}).catch(function(err){notify(err.message,"error");});
+    doUpload(fl, {parent_id:parentId,space_id:space.id});
     e.target.value="";
+  }
+
+  function doUpload(files, opts) {
+    var fd=new FormData();
+    var names=[];
+    for(var i=0;i<files.length;i++){fd.append("files",files[i]);names.push(files[i].name);}
+    if(opts.parent_id) fd.append("parent_id",opts.parent_id);
+    if(opts.space_id) fd.append("space_id",opts.space_id);
+    var label=names.length===1?names[0]:names.length+" files";
+    if(label.length>30) label=label.substring(0,27)+"...";
+    setUploadProgress({active:true,percent:0,label:label,status:"uploading"});
+
+    var xhr=new XMLHttpRequest();
+    xhr.open("POST",API+"/files/upload");
+    xhr.setRequestHeader("Authorization","Bearer "+getToken());
+    xhr.upload.onprogress=function(ev){if(ev.lengthComputable){setUploadProgress(function(p){return{...p,percent:Math.round((ev.loaded/ev.total)*100)};});}};
+    xhr.onload=function(){
+      if(xhr.status>=200&&xhr.status<300){
+        setUploadProgress({active:true,percent:100,label:label,status:"complete"});
+        notify("Upload complete!","success");loadFiles();loadAllFiles();
+        setTimeout(function(){setUploadProgress({active:false});},3000);
+      } else {
+        var msg="Upload failed";try{msg=JSON.parse(xhr.responseText).error||msg;}catch(ex){}
+        setUploadProgress({active:true,percent:0,label:label,status:"error",error:msg});
+        notify(msg,"error");setTimeout(function(){setUploadProgress({active:false});},6000);
+      }
+    };
+    xhr.onerror=function(){notify("Network error","error");setUploadProgress({active:false});};
+    xhr.send(fd);
   }
   function createFolder() {
     if(!folderName.trim()) return;
@@ -1750,6 +2089,18 @@ function SpaceWorkspace(props) {
         <div className="form-group"><label className="form-label">Storage Quota</label><div style={{fontSize:13}}>{space.storage_quota && parseInt(space.storage_quota)>0 ? fmtSize(space.storage_quota) : "Unlimited"}</div></div>
         <div className="form-group"><label className="form-label">Created</label><div style={{fontSize:13,color:"var(--text-secondary)"}}>{fmtDate(space.created_at)}</div></div>
       </Modal>
+      {/* Upload Progress */}
+      {uploadProgress&&uploadProgress.active&&<div style={{position:"fixed",bottom:20,right:20,zIndex:300,minWidth:320,background:uploadProgress.status==="error"?"#2D1215":uploadProgress.status==="complete"?"#0D2818":"var(--bg-secondary)",border:"1px solid "+(uploadProgress.status==="error"?"rgba(248,81,73,0.3)":uploadProgress.status==="complete"?"rgba(52,211,153,0.3)":"var(--border)"),borderRadius:12,padding:"14px 18px",boxShadow:"0 8px 24px rgba(0,0,0,0.5)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:uploadProgress.status==="complete"||uploadProgress.status==="error"?0:8}}>
+          <div style={{fontSize:13,fontWeight:600,color:uploadProgress.status==="error"?"var(--danger)":uploadProgress.status==="complete"?"var(--success)":"var(--text-primary)"}}>
+            {uploadProgress.status==="error"?"❌ Upload Failed":uploadProgress.status==="complete"?"✅ Upload Complete":"📤 Uploading..."}
+          </div>
+          <span style={{fontSize:13,fontWeight:700,color:uploadProgress.status==="error"?"var(--danger)":uploadProgress.status==="complete"?"var(--success)":"var(--accent)"}}>{uploadProgress.status!=="error"?uploadProgress.percent+"%":""}</span>
+        </div>
+        <div style={{fontSize:11,color:"var(--text-tertiary)",marginBottom:uploadProgress.status==="complete"||uploadProgress.status==="error"?0:8}}>{uploadProgress.status==="error"?uploadProgress.error:uploadProgress.label}</div>
+        {uploadProgress.status==="uploading"&&<div style={{height:4,background:"var(--bg-active)",borderRadius:2,overflow:"hidden"}}><div style={{height:"100%",width:uploadProgress.percent+"%",background:"var(--accent)",borderRadius:2,transition:"width .2s ease"}}></div></div>}
+      </div>}
+
     </div>
   );
 }
@@ -1791,7 +2142,11 @@ function UsersPage() {
               <td style={{color:"var(--text-tertiary)",fontSize:12}}>{fmtTime(u.last_active_at)}</td>
               {isAdmin&&<td>{u.id!==auth.user.id&&<div style={{display:"flex",gap:4}}>
                     <button className="btn btn-ghost btn-sm" onClick={function(){toggleStatus(u);}}>{u.status==="active"?"Deactivate":"Activate"}</button>
-                    {u.status!=="active"&&<button className="btn btn-danger btn-sm" onClick={function(){if(confirm("Suspend user "+u.name+"? They will not be able to log in.")){apiFetch("/users/"+u.id,{method:"DELETE"}).then(function(){notify("User suspended","success");load();}).catch(function(e){notify(e.message,"error");});}}}>Remove</button>}
+                    {u.id!==auth.user.id&&<div style={{display:"flex",gap:4}}>
+                      {u.status==="active"&&<button className="btn btn-secondary btn-sm" onClick={function(){if(confirm("Suspend "+u.name+"? They will not be able to log in.")){apiFetch("/users/"+u.id,{method:"DELETE"}).then(function(){notify("User suspended","success");load();}).catch(function(e){notify(e.message,"error");});}}}>Suspend</button>}
+                      {u.status==="suspended"&&<button className="btn btn-primary btn-sm" onClick={function(){apiFetch("/users/"+u.id+"/reactivate",{method:"POST"}).then(function(){notify("User reactivated","success");load();}).catch(function(e){notify(e.message,"error");});}}>Reactivate</button>}
+                      <button className="btn btn-danger btn-sm" onClick={function(){if(confirm("PERMANENTLY DELETE "+u.name+"?\n\nThis will remove their account, portal access, space memberships, and project memberships.\n\nThis cannot be undone.")){apiFetch("/users/"+u.id+"/permanent",{method:"DELETE"}).then(function(){notify("User deleted permanently","success");load();}).catch(function(e){notify(e.message,"error");});}}}>Delete</button>
+                    </div>}
                   </div>}</td>}
             </tr>
           );})}</tbody>
@@ -1974,13 +2329,13 @@ function DrivesPage() {
             <thead><tr><th>Name</th><th>Size</th><th>Modified</th><th style={{width:100}}>Actions</th></tr></thead>
             <tbody>{browseFiles.map(function(f,i){return(
               <tr key={i}>
-                <td><div className="file-name" style={{cursor:f.isDirectory?"pointer":"default"}} onClick={function(){if(f.isDirectory)browseTo(f.name);}}>
-                  <FileIcon type={f.isDirectory?"folder":"document"} />
+                <td><div className="file-name" style={{cursor:f.isDir?"pointer":"default"}} onClick={function(){if(f.isDir)browseTo(f.name);}}>
+                  <FileIcon type={f.isDir?"folder":"document"} />
                   <span>{f.name}</span>
                 </div></td>
-                <td style={{color:"var(--text-tertiary)"}}>{f.isDirectory?"—":fmtSize(f.size)}</td>
+                <td style={{color:"var(--text-tertiary)"}}>{f.isDir?"—":fmtSize(f.size)}</td>
                 <td style={{color:"var(--text-tertiary)",fontSize:12}}>{f.modified?fmtTime(f.modified):"—"}</td>
-                <td>{!f.isDirectory&&<button className="btn btn-primary btn-sm" onClick={function(){importFileFromDrive(browsePath?browsePath+"/"+f.name:f.name);}}><IconImport /> Import</button>}</td>
+                <td>{!f.isDir&&<button className="btn btn-primary btn-sm" onClick={function(){importFileFromDrive(browsePath?browsePath+"/"+f.name:f.name);}}><IconImport /> Import</button>}</td>
               </tr>
             );})}</tbody>
           </table></div></div>
