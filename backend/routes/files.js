@@ -33,6 +33,22 @@ router.get('/', authenticate, async (req, res) => {
   try {
     const { parent_id, space_id, project_id, search, starred, trashed, page = 1, limit = 50, sort = 'updated_at', order = 'DESC' } = req.query;
     let sql = `SELECT f.*, u.name as owner_name FROM files f LEFT JOIN users u ON f.owner_id = u.id WHERE f.org_id=$1`;
+
+    // Scope files by role — non-admins only see files in their spaces/projects
+    const role = req.user.role;
+    if (role !== 'admin') {
+      if (role === 'project_manager') {
+        // Only files in projects they are a member of
+        sql += ` AND (f.project_id IN (SELECT project_id FROM project_members WHERE user_id=$${idx++}) OR f.space_id IN (SELECT space_id FROM space_members WHERE user_id=$${idx}))`;
+        params.push(req.user.id, req.user.id);
+        idx++;
+      } else {
+        // file_manager, member, viewer: files in spaces they belong to
+        sql += ` AND (f.space_id IN (SELECT space_id FROM space_members WHERE user_id=$${idx++}) OR f.project_id IN (SELECT p.id FROM projects p INNER JOIN space_members sm ON p.space_id = sm.space_id WHERE sm.user_id=$${idx}))`;
+        params.push(req.user.id, req.user.id);
+        idx++;
+      }
+    }
     const params = [req.user.org_id];
     let idx = 2;
 

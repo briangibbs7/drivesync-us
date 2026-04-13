@@ -79,6 +79,20 @@ router.get('/:id/quota', authenticate, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+
+router.get('/:id/members', authenticate, async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT sm.id, sm.role as member_role, sm.joined_at,
+              u.id as user_id, u.name, u.email, u.role, u.department, u.avatar_url, u.status, u.last_active_at
+       FROM space_members sm JOIN users u ON sm.user_id = u.id
+       WHERE sm.space_id=$1 ORDER BY u.name`,
+      [req.params.id]
+    );
+    res.json({ members: result.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.post('/:id/members', authenticate, authorize('admin', 'file_manager', 'manager'), async (req, res) => {
   try {
     const { user_id, role = 'member' } = req.body;

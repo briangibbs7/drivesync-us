@@ -336,28 +336,28 @@ var roleDefinitions = {
     color: "#F59E0B",
     icon: "📋",
     desc: "Create and manage projects, add files to assigned projects",
-    permissions: ["Create new projects","Edit own projects","Delete own projects","Upload files & create folders in own projects","Add files to projects assigned as editor","View all spaces & projects","Cannot create spaces","Cannot manage users or portals"]
+    permissions: ["Create new projects","Edit assigned projects only","Manage members of assigned projects","Upload files & create folders in assigned projects","Cannot see unassigned projects","Cannot create spaces","Cannot manage users or portals","Cannot access drives or servers"]
   },
   file_manager: {
     label: "File Manager",
     color: "#8B5CF6",
     icon: "📁",
     desc: "Full control of files, spaces, sharing, drives, servers and portal access",
-    permissions: ["Create, edit, delete spaces","Full file management across all spaces","Share link creation & management","SMB/CIFS drive mounting & browsing","Server sync management","Portal access management","Invite users","Cannot access system settings"]
+    permissions: ["Create, edit, delete assigned spaces","File management within assigned spaces","Share link creation & management","SMB/CIFS drive mounting & browsing","Server sync management","Portal access management","Invite users","Cannot see unassigned spaces","Cannot access system settings"]
   },
   member: {
     label: "Member",
     color: "#4F8EF7",
     icon: "👤",
     desc: "Standard team member with upload access",
-    permissions: ["Upload files & create folders","Create documents in editor","Star & trash own files","Preview & download files","View spaces & projects","Cannot create spaces or projects","Cannot manage users or portals"]
+    permissions: ["Upload files & create folders in assigned spaces","Create documents in editor","Star & trash own files","Preview & download files","Only see assigned spaces & their projects","Cannot create spaces or projects","Cannot manage users or portals"]
   },
   viewer: {
     label: "Viewer",
     color: "#10B981",
     icon: "👁️",
     desc: "Read-only access to files and projects",
-    permissions: ["View & preview files (PDF, images, video, text)","Browse spaces & projects","View activity feed","Cannot upload, edit, or download","Cannot create or modify anything"]
+    permissions: ["View & preview files in assigned spaces","Browse assigned spaces & their projects","View activity feed","Cannot see unassigned spaces","Cannot upload, edit, or download","Cannot create or modify anything"]
   },
   external: {
     label: "External",
@@ -1387,9 +1387,9 @@ function ProjectWorkspace(props) {
   }
 
   function loadMembers() {
-    apiFetch("/users")
-      .then(function(d) { setMembers(d.users || []); })
-      .catch(function(){});
+    apiFetch("/projects/"+project.id+"/members")
+      .then(function(d) { setMembers(d.members || []); })
+      .catch(function(){ apiFetch("/users").then(function(d){setMembers(d.users||[]);}); });
   }
 
   useEffect(function() { loadFiles(); loadAllFiles(); loadActivity(); loadMembers(); }, [parentId]);
@@ -1794,7 +1794,10 @@ function SpaceWorkspace(props) {
       .then(function(d) { setAllFiles(d.files || []); }).catch(function(){});
   }
   function loadActivity() { apiFetch("/activity?limit=20").then(function(d) { setActivity(d.activity || []); }).catch(function(){}); }
-  function loadMembers() { apiFetch("/users").then(function(d) { setMembers(d.users || []); setAllUsers(d.users || []); }).catch(function(){}); }
+  function loadMembers() {
+    apiFetch("/spaces/"+space.id+"/members").then(function(d) { setMembers(d.members || []); }).catch(function(){});
+    apiFetch("/users").then(function(d) { setAllUsers(d.users || []); }).catch(function(){});
+  }
   function loadProjects() { apiFetch("/projects?space_id=" + space.id).then(function(d) { setProjects(d.projects || []); }).catch(function(){}); }
 
   useEffect(function() { loadFiles(); loadAllFiles(); loadActivity(); loadMembers(); loadProjects(); }, [parentId]);
@@ -2034,7 +2037,7 @@ function SpaceWorkspace(props) {
                 <td style={{color:"var(--text-secondary)",fontSize:13}}>{u.department||"—"}</td>
                 <td><div style={{display:"flex",alignItems:"center",gap:6}}><StatusDot status={u.status} /><span style={{fontSize:12,color:"var(--text-secondary)"}}>{u.status}</span></div></td>
                 <td style={{color:"var(--text-tertiary)",fontSize:12}}>{fmtTime(u.last_active_at)}</td>
-                <td><button className="btn btn-ghost btn-sm btn-icon" onClick={function(){removeMember(u.id);}} title="Remove"><IconX /></button></td>
+                <td><button className="btn btn-ghost btn-sm btn-icon" onClick={function(){removeMember(u.user_id||u.id);}} title="Remove"><IconX /></button></td>
               </tr>
             );})}</tbody>
           </table></div>}
@@ -2077,7 +2080,7 @@ function SpaceWorkspace(props) {
       <Modal open={showAddMember} onClose={function(){setShowAddMember(false);}} title="Add Member to Space" footer={
         <React.Fragment><button className="btn btn-secondary" onClick={function(){setShowAddMember(false);}}>Cancel</button><button className="btn btn-primary" onClick={addMember}>Add Member</button></React.Fragment>
       }>
-        <div className="form-group"><label className="form-label">User</label><select className="form-select" value={addMemberForm.user_id} onChange={function(e){setAddMemberForm({...addMemberForm,user_id:e.target.value});}}><option value="">Select user...</option>{allUsers.map(function(u){return <option key={u.id} value={u.id}>{u.name} ({u.email})</option>;})}</select></div>
+        <div className="form-group"><label className="form-label">User</label><select className="form-select" value={addMemberForm.user_id} onChange={function(e){setAddMemberForm({...addMemberForm,user_id:e.target.value});}}><option value="">Select user...</option>{allUsers.filter(function(u){return !members.some(function(m){return (m.user_id||m.id)===u.id;});}).map(function(u){return <option key={u.id} value={u.id}>{u.name} ({u.email})</option>;})}</select></div>
         <div className="form-group"><label className="form-label">Role in Space</label><select className="form-select" value={addMemberForm.role} onChange={function(e){setAddMemberForm({...addMemberForm,role:e.target.value});}}>{Object.keys(roleColors).map(function(r){return <option key={r} value={r}>{r}</option>;})}</select></div>
       </Modal>
 
@@ -2114,6 +2117,12 @@ function UsersPage() {
   var [show, setShow] = useState(false);
   var [form, setForm] = useState({email:"",name:"",role:"member",department:""});
   var [tab, setTab] = useState("Users");
+  var [accessUser, setAccessUser] = useState(null);
+  var [userSpaces, setUserSpaces] = useState([]);
+  var [userProjects, setUserProjects] = useState([]);
+  var [allSpaces, setAllSpaces] = useState([]);
+  var [allProjects, setAllProjects] = useState([]);
+  var [accessLoading, setAccessLoading] = useState(false);
   var auth = useAuth();
   var notify = useNotify();
   function load() { apiFetch("/users").then(function(d){setUsers(d.users||[]);setTotal(d.total||0);}); }
@@ -2123,6 +2132,69 @@ function UsersPage() {
     apiFetch("/users/invite",{method:"POST",body:form}).then(function(){notify("Invited!","success");setShow(false);setForm({email:"",name:"",role:"member",department:""});load();}).catch(function(e){notify(e.message,"error");});
   }
   function updateRole(uid,role) { apiFetch("/users/"+uid,{method:"PATCH",body:{role:role}}).then(function(){notify("Updated","success");load();}).catch(function(e){notify(e.message,"error");}); }
+  function openAccessPanel(u) {
+    setAccessUser(u);
+    setAccessLoading(true);
+    // Load user's current space and project memberships
+    Promise.all([
+      apiFetch("/spaces"),
+      apiFetch("/projects"),
+    ]).then(function(results) {
+      var spaces = results[0].spaces || [];
+      var projects = results[1].projects || [];
+      setAllSpaces(spaces);
+      setAllProjects(projects);
+      // Now check which ones this user is a member of
+      return Promise.all([
+        ...spaces.map(function(s) {
+          return apiFetch("/spaces/" + s.id + "/members").then(function(d) {
+            return { space_id: s.id, isMember: (d.members || []).some(function(m) { return m.user_id === u.id; }) };
+          }).catch(function() { return { space_id: s.id, isMember: false }; });
+        }),
+        ...projects.map(function(p) {
+          return apiFetch("/projects/" + p.id + "/members").then(function(d) {
+            return { project_id: p.id, isMember: (d.members || []).some(function(m) { return m.user_id === u.id; }) };
+          }).catch(function() { return { project_id: p.id, isMember: false }; });
+        })
+      ]);
+    }).then(function(memberships) {
+      var sids = []; var pids = [];
+      memberships.forEach(function(m) {
+        if (m.space_id && m.isMember) sids.push(m.space_id);
+        if (m.project_id && m.isMember) pids.push(m.project_id);
+      });
+      setUserSpaces(sids);
+      setUserProjects(pids);
+    }).catch(function(e) { notify("Error loading access: " + e.message, "error"); })
+    .finally(function() { setAccessLoading(false); });
+  }
+
+  function toggleSpaceAccess(spaceId) {
+    var isMember = userSpaces.indexOf(spaceId) >= 0;
+    if (isMember) {
+      apiFetch("/spaces/" + spaceId + "/members/" + accessUser.id, { method: "DELETE" })
+        .then(function() { setUserSpaces(function(s) { return s.filter(function(x) { return x !== spaceId; }); }); notify("Removed from space", "success"); })
+        .catch(function(e) { notify(e.message, "error"); });
+    } else {
+      apiFetch("/spaces/" + spaceId + "/members", { method: "POST", body: { user_id: accessUser.id, role: accessUser.role || "member" } })
+        .then(function() { setUserSpaces(function(s) { return s.concat(spaceId); }); notify("Added to space", "success"); })
+        .catch(function(e) { notify(e.message, "error"); });
+    }
+  }
+
+  function toggleProjectAccess(projectId) {
+    var isMember = userProjects.indexOf(projectId) >= 0;
+    if (isMember) {
+      apiFetch("/projects/" + projectId + "/members/" + accessUser.id, { method: "DELETE" })
+        .then(function() { setUserProjects(function(p) { return p.filter(function(x) { return x !== projectId; }); }); notify("Removed from project", "success"); })
+        .catch(function(e) { notify(e.message, "error"); });
+    } else {
+      apiFetch("/projects/" + projectId + "/members", { method: "POST", body: { user_id: accessUser.id, role: accessUser.role || "member" } })
+        .then(function() { setUserProjects(function(p) { return p.concat(projectId); }); notify("Added to project", "success"); })
+        .catch(function(e) { notify(e.message, "error"); });
+    }
+  }
+
   function toggleStatus(u) { var ns=u.status==="active"?"inactive":"active"; apiFetch("/users/"+u.id,{method:"PATCH",body:{status:ns}}).then(function(){notify("Updated","success");load();}).catch(function(e){notify(e.message,"error");}); }
   var isAdmin = auth.user && auth.user.role==="admin";
   return (
@@ -2141,6 +2213,7 @@ function UsersPage() {
               <td><div style={{display:"flex",alignItems:"center",gap:6}}><StatusDot status={u.status} /><span style={{fontSize:12,color:"var(--text-secondary)"}}>{u.status}</span></div></td>
               <td style={{color:"var(--text-tertiary)",fontSize:12}}>{fmtTime(u.last_active_at)}</td>
               {isAdmin&&<td>{u.id!==auth.user.id&&<div style={{display:"flex",gap:4}}>
+                    <button className="btn btn-ghost btn-sm" onClick={function(){openAccessPanel(u);}}>Access</button>
                     <button className="btn btn-ghost btn-sm" onClick={function(){toggleStatus(u);}}>{u.status==="active"?"Deactivate":"Activate"}</button>
                     {u.id!==auth.user.id&&<div style={{display:"flex",gap:4}}>
                       {u.status==="active"&&<button className="btn btn-secondary btn-sm" onClick={function(){if(confirm("Suspend "+u.name+"? They will not be able to log in.")){apiFetch("/users/"+u.id,{method:"DELETE"}).then(function(){notify("User suspended","success");load();}).catch(function(e){notify(e.message,"error");});}}}>Suspend</button>}
@@ -2153,6 +2226,51 @@ function UsersPage() {
         </table></div>}
       </div>}
       {tab==="Roles"&&React.createElement(RoleCards)}
+      <Modal open={!!accessUser} onClose={function(){setAccessUser(null);}} title={accessUser ? "Manage Access — " + accessUser.name : ""} footer={
+        <React.Fragment><button className="btn btn-secondary" onClick={function(){setAccessUser(null);}}>Done</button></React.Fragment>
+      }>
+        {accessUser && <div>
+          <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",background:"var(--bg-tertiary)",borderRadius:"var(--radius-sm)",marginBottom:20}}>
+            <div className="avatar-sm" style={{background:"hsl("+(accessUser.email.charCodeAt(0)*7)+",55%,50%)"}}>{(accessUser.name||"").substring(0,2).toUpperCase()}</div>
+            <div><div style={{fontSize:14,fontWeight:600}}>{accessUser.name}</div><div style={{fontSize:11,color:"var(--text-tertiary)"}}>{accessUser.email} · <RoleBadge role={accessUser.role} /></div></div>
+          </div>
+
+          {accessLoading ? <div style={{textAlign:"center",padding:30,color:"var(--text-tertiary)"}}>Loading access...</div> : <div>
+            <h4 style={{fontSize:13,fontWeight:700,marginBottom:10,color:"var(--text-secondary)"}}>Spaces</h4>
+            <div style={{maxHeight:200,overflowY:"auto",border:"1px solid var(--border-subtle)",borderRadius:"var(--radius-sm)",padding:6,marginBottom:20}}>
+              {allSpaces.map(function(s) {
+                var isMember = userSpaces.indexOf(s.id) >= 0;
+                return <div key={s.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",borderRadius:6,background:isMember?"var(--accent-muted)":"transparent",marginBottom:2}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:16}}>{s.icon||"📁"}</span>
+                    <div><div style={{fontSize:13,fontWeight:500}}>{s.name}</div><div style={{fontSize:10,color:"var(--text-tertiary)"}}>{s.member_count} members · {fmtSize(parseInt(s.storage_used))}</div></div>
+                  </div>
+                  <button className={"btn btn-sm "+(isMember?"btn-danger":"btn-primary")} onClick={function(){toggleSpaceAccess(s.id);}}>{isMember?"Remove":"Add"}</button>
+                </div>;
+              })}
+            </div>
+
+            <h4 style={{fontSize:13,fontWeight:700,marginBottom:10,color:"var(--text-secondary)"}}>Projects</h4>
+            <div style={{maxHeight:250,overflowY:"auto",border:"1px solid var(--border-subtle)",borderRadius:"var(--radius-sm)",padding:6}}>
+              {allProjects.map(function(p) {
+                var isMember = userProjects.indexOf(p.id) >= 0;
+                var spaceAssigned = userSpaces.indexOf(p.space_id) >= 0;
+                return <div key={p.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",borderRadius:6,background:isMember?"var(--accent-muted)":spaceAssigned?"rgba(52,211,153,0.05)":"transparent",marginBottom:2}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{width:8,height:8,borderRadius:2,background:p.color||"var(--accent)"}}></div>
+                    <div><div style={{fontSize:13,fontWeight:500}}>{p.name}</div><div style={{fontSize:10,color:"var(--text-tertiary)"}}>{p.space_name} · {p.file_count} files</div></div>
+                  </div>
+                  {spaceAssigned && !isMember ?
+                    <span style={{fontSize:10,color:"var(--success)",fontWeight:600}}>Via Space</span> :
+                    <button className={"btn btn-sm "+(isMember?"btn-danger":"btn-primary")} onClick={function(){toggleProjectAccess(p.id);}}>{isMember?"Remove":"Add"}</button>
+                  }
+                </div>;
+              })}
+            </div>
+          </div>}
+        </div>}
+      </Modal>
+
       <Modal open={show} onClose={function(){setShow(false);}} title="Invite User" footer={<React.Fragment><button className="btn btn-secondary" onClick={function(){setShow(false);}}>Cancel</button><button className="btn btn-primary" onClick={invite}>Send Invite</button></React.Fragment>}>
         <div className="form-group"><label className="form-label">Full Name</label><input className="form-input" value={form.name} onChange={function(e){setForm({...form,name:e.target.value});}} placeholder="John Doe" /></div>
         <div className="form-group"><label className="form-label">Email</label><input className="form-input" value={form.email} onChange={function(e){setForm({...form,email:e.target.value});}} placeholder="user@company.com" /></div>
