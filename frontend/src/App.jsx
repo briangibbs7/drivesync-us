@@ -2733,7 +2733,7 @@ function PortalAdmin(props) {
   useEffect(function(){loadAccess();loadProjects();loadAllSpaces();loadPortalAssignments();loadInternalUsers();},[]);
 
   function inviteCustomer() {
-    if(!inviteForm.email||!inviteForm.name||!inviteForm.password){notify("Email, name, and password required","error");return;}
+    if(!inviteForm.email||!inviteForm.name){notify("Email and name required","error");return;}
     var body = {...inviteForm};
     if(!body.expires_days) delete body.expires_days; else body.expires_days=parseInt(body.expires_days);
     apiFetch("/portals/"+portal.id+"/invite",{method:"POST",body:body}).then(function(){
@@ -3013,7 +3013,7 @@ function PortalAdmin(props) {
           <div className="form-group"><label className="form-label">Email</label><input className="form-input" value={inviteForm.email} onChange={function(e){setInviteForm({...inviteForm,email:e.target.value});}} placeholder="john@company.com" /></div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-          <div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" value={inviteForm.password} onChange={function(e){setInviteForm({...inviteForm,password:e.target.value});}} placeholder="Initial password" /></div>
+          <div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" value={inviteForm.password} onChange={function(e){setInviteForm({...inviteForm,password:e.target.value});}} placeholder="Initial password" /><div style={{fontSize:11,color:"var(--text-tertiary)",marginTop:4}}>Optional — users will sign in via email verification code</div></div>
           <div className="form-group"><label className="form-label">Company</label><input className="form-input" value={inviteForm.company} onChange={function(e){setInviteForm({...inviteForm,company:e.target.value});}} placeholder="Acme Corp" /></div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>

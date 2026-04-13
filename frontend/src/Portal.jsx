@@ -132,7 +132,7 @@ function PortalLogin(props) {
   var [error, setError] = useState("");
   var [success, setSuccess] = useState("");
   var [busy, setBusy] = useState(false);
-  var [mode, setMode] = useState("choose"); // choose, password, otp-send, otp-verify, forgot, reset
+  var [mode, setMode] = useState("otp-send"); // choose, password, otp-send, otp-verify, forgot, reset
   var [resetToken, setResetToken] = useState("");
   var [newPassword, setNewPassword] = useState("");
   var [confirmPassword, setConfirmPassword] = useState("");
@@ -289,7 +289,7 @@ function PortalLogin(props) {
           <button className="p-btn p-btn-primary" style={{width:"100%",padding:"12px",marginTop:4,background:brandColor}} type="submit" disabled={busy||otpCode.length<6}>{busy?"Verifying...":"Verify & Sign In"}</button>
           <div style={{display:"flex",justifyContent:"space-between",marginTop:14}}>
             <span style={{color:brandColor,cursor:"pointer",fontSize:13}} onClick={function(){setMode("otp-send");setError("");setSuccess("");}}>← Resend code</span>
-            <span style={{color:"var(--t3)",cursor:"pointer",fontSize:13}} onClick={function(){setMode("choose");setError("");setSuccess("");}}>Other options</span>
+            <span style={{color:"var(--t3)",cursor:"pointer",fontSize:13}} onClick={function(){setMode("choose");setError("");setSuccess("");}}>Other sign-in options</span>
           </div>
         </form>}
 

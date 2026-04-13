@@ -152,19 +152,23 @@ export async function sendPortalInvite({ to, customerName, portalName, portalSlu
         ${projectList}
       </table>
 
-      <div style="margin:20px 0 8px;font-size:13px;font-weight:600;color:#0F172A">Login Credentials</div>
+      <div style="margin:20px 0 8px;font-size:13px;font-weight:600;color:#0F172A">How to Sign In</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
         <tr>
-          <td style="padding:12px 16px;border-bottom:1px solid #E2E8F0;font-size:13px;color:#64748B;width:80px">Email</td>
-          <td style="padding:12px 16px;border-bottom:1px solid #E2E8F0;font-size:13px;color:#0F172A;font-weight:500;font-family:'SFMono-Regular',Consolas,monospace">${to}</td>
+          <td style="padding:12px 16px;border-bottom:1px solid #E2E8F0;font-size:13px;color:#64748B;width:40px;text-align:center;font-size:16px">1</td>
+          <td style="padding:12px 16px;border-bottom:1px solid #E2E8F0;font-size:13px;color:#0F172A">Click <strong>Open Portal</strong> above to visit the login page</td>
         </tr>
         <tr>
-          <td style="padding:12px 16px;font-size:13px;color:#64748B;width:80px">Password</td>
-          <td style="padding:12px 16px;font-size:13px;color:#0F172A;font-weight:500;font-family:'SFMono-Regular',Consolas,monospace">${password}</td>
+          <td style="padding:12px 16px;border-bottom:1px solid #E2E8F0;font-size:13px;color:#64748B;width:40px;text-align:center;font-size:16px">2</td>
+          <td style="padding:12px 16px;border-bottom:1px solid #E2E8F0;font-size:13px;color:#0F172A">Enter your email: <strong style="font-family:'SFMono-Regular',Consolas,monospace">${to}</strong></td>
+        </tr>
+        <tr>
+          <td style="padding:12px 16px;font-size:13px;color:#64748B;width:40px;text-align:center;font-size:16px">3</td>
+          <td style="padding:12px 16px;font-size:13px;color:#0F172A">A <strong>verification code</strong> will be sent to your email — enter it to sign in</td>
         </tr>
       </table>
 
-      ${note('Please change your password after your first login. Do not forward this email.', 'warning')}
+      ${note('Each time you log in, a new verification code will be emailed to you. No password is needed.', 'info')}
 
       <div style="margin-top:20px;padding-top:16px;border-top:1px solid #E2E8F0">
         <div style="font-size:11px;color:#94A3B8">Portal URL: <a href="${portalUrl}" style="color:#2563EB;text-decoration:none">${portalUrl}</a></div>

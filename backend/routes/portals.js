@@ -148,13 +148,13 @@ router.delete('/:id/access/:userId', authenticate, authorize('admin', 'file_mana
 router.post('/:id/invite', authenticate, authorize('admin', 'file_manager'), async (req, res) => {
   try {
     const { email, name, password, company, permission, project_ids, space_ids, expires_days } = req.body;
-    if (!email || !name || !password) return res.status(400).json({ error: 'Email, name, and password required' });
+    if (!email || !name) return res.status(400).json({ error: 'Email and name required' });
 
     const portalRes = await query('SELECT * FROM portals WHERE id=$1 AND org_id=$2', [req.params.id, req.user.org_id]);
     if (!portalRes.rows.length) return res.status(404).json({ error: 'Portal not found' });
     const portal = portalRes.rows[0];
 
-    const hash = await bcrypt.hash(password, 12);
+    const hash = password ? await bcrypt.hash(password, 12) : null;
     let userRes = await query('SELECT * FROM users WHERE email=$1 AND org_id=$2', [email, portal.org_id]);
     let user;
     if (userRes.rows.length) {
